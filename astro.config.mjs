@@ -18,7 +18,11 @@ export default defineConfig({
       external: ["argon2", "@prisma/adapter-pg", "pg"],
     },
   },
+  // `checkOrigin: true` blokuje POST requesty při deploy za Reverse Proxy,
+  // protože server vidí request URL `http://localhost:3000` ale prohlížeč
+  // posílá Origin `https://www.raseliniste.cz` → mismatch.
+  // CSRF je v našem případě pokrytý sameSite=strict cookie a konstrukcí tokens.
   security: {
-    checkOrigin: true,
+    checkOrigin: false,
   },
 });
