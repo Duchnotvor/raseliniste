@@ -1,0 +1,710 @@
+# Rašeliniště — Handbook
+
+Osobní informační systém Petra „Gideona" Perniy. Jeden uživatel, maximum bezpečnosti, postupné rozšiřování.
+
+> **TL;DR:** Astro 6 + React 19 islands + Prisma 7 + PostgreSQL 16, běží na Synology DS718+ v Dockeru, deploy přes ghcr.io. Design **Liquid Glass** na dark navy pozadí. Login je **heslo + passkey (Touch ID)**. Tři živé moduly: **Capture** (diktát → Gemini klasifikace → triage), **Deník** (přímý deníkový zápis + AI redakce + hashtagy + lokace), **Zdraví** (Apple Health přes Health Auto Export + dashboard + AI analýzy + měsíční cron mail).
+
+---
+
+## Obsah
+
+1. [Rychlý start](#rychlý-start)
+2. [Stack](#stack)
+3. [Struktura repa](#struktura-repa)
+4. [Datový model](#datový-model)
+5. [Moduly — aktuální stav](#moduly--aktuální-stav)
+6. [Auth](#auth)
+7. [Gemini modely](#gemini-modely)
+8. [API reference](#api-reference)
+9. [Design system](#design-system)
+10. [Vývojový workflow](#vývojový-workflow)
+11. [Deploy na Synology](#deploy-na-synology)
+12. [Email (Resend)](#email-resend)
+13. [Cron na Synology](#cron-na-synology)
+14. [iPhone Shortcuty a HAE](#iphone-shortcuty-a-hae)
+15. [Provoz a troubleshooting](#provoz-a-troubleshooting)
+16. [Roadmap](#roadmap)
+
+---
+
+## Rychlý start
+
+Předpoklady: Node 22+, Docker Desktop, macOS/Linux.
+
+```bash
+# 1. deps
+npm install
+
+# 2. local Postgres (docker-compose.dev.yml)
+docker compose -f docker-compose.dev.yml up -d
+
+# 3. .env.local — pokud neexistuje, zkopíruj z .env.example a doplň hodnoty:
+#    DATABASE_URL, SESSION_SECRET, GEMINI_API_KEY, APP_URL,
+#    ADMIN_USERNAME, ADMIN_PASSWORD
+#    (volitelně RESEND_API_KEY, NOTIFICATION_FROM/EMAIL, CRON_SECRET)
+
+# 4. migrace + seed admin uživatele (Gideon)
+npx prisma migrate deploy
+npm run db:seed
+
+# 5. dev server
+npm run dev
+# → http://localhost:3000/login
+```
+
+Pokud Gideon ještě nemá passkey, po zadání hesla tě systém pošle na `enrollment`. Potvrď Touch ID. Další login už bude password + Touch ID.
+
+### Jednorázový import zdravotních dat z HAE
+
+```bash
+npm run health:import -- ~/Downloads/HealthAutoExport-<range>.json
+# Naimportuje všechny metriky + ECG do DB. Re-run je bezpečný (unique index).
+```
+
+---
+
+## Stack
+
+| Vrstva | Technologie | Poznámka |
+|---|---|---|
+| Jazyk | TypeScript 5 (strict) | |
+| Runtime | Node.js 22 (Alpine v Dockeru) | |
+| Framework | **Astro 6** (output: server) | Node adapter v `mode: "standalone"` |
+| React | 19 | jen pro interaktivní islands |
+| DB | **PostgreSQL 16 Alpine** | druhý Docker kontejner |
+| ORM | **Prisma 7** + `@prisma/adapter-pg` + `pg` | nový generator v `src/generated/prisma` |
+| Styling | **Tailwind v4** + shadcn-style tokeny + vlastní `glass` utility | OKLCH, dark-only |
+| Fonty | **Fraunces** (serif), **Geist** (sans), **Geist Mono** | přes `@fontsource-variable/*` |
+| Ikony | **Lucide** (`astro-icon` + `@iconify-json/lucide` + `lucide-react`) | |
+| Auth | argon2id + jose JWT cookies + WebAuthn/passkey | `@simplewebauthn/*` |
+| Validace | **zod** | každý API endpoint |
+| AI | `@google/genai` (Gemini 2.5 Flash/Pro) | klíč výhradně server-side |
+| Grafy | **Recharts** 3 | Health dashboard |
+| Markdown | **marked** | pro Gemini analýzy v prose styling |
+| Email | **Resend** (HTTP API) | fallback na log v dev |
+| Deploy | Docker multi-stage → ghcr.io → Synology DS718+ | viz `SYNOLOGY_DEPLOY_PATTERN.md` |
+| CI | GitHub Actions (`.github/workflows/docker-build.yml`) | build + push na main |
+
+---
+
+## Struktura repa
+
+```
+raseliniste/
+├── src/
+│   ├── pages/
+│   │   ├── index.astro                     # Dashboard (chráněný)
+│   │   ├── login.astro                     # Login (password + passkey)
+│   │   ├── capture.astro                   # Ruční vstup (fallback)
+│   │   ├── triage.astro                    # Capture → Triage UI
+│   │   ├── journal.astro                   # Deník — feed, search, filtry
+│   │   ├── health.astro                    # Zdraví — dashboard + analýzy
+│   │   ├── 404.astro                       # Glass 404
+│   │   ├── settings/
+│   │   │   ├── tokens.astro                # Správa API tokenů
+│   │   │   ├── reports.astro               # Email notifikace — kam posílat
+│   │   │   ├── shortcuts.astro             # iPhone Shortcut návod
+│   │   │   └── ingest.astro                # Health Auto Export návod
+│   │   └── api/
+│   │       ├── auth/
+│   │       │   ├── login.ts / logout.ts / me.ts
+│   │       │   └── passkey/                # register-options, register-verify,
+│   │       │                               # auth-options, auth-verify
+│   │       ├── tokens/                     # index (GET/POST) + [id] (DELETE)
+│   │       ├── settings/
+│   │       │   └── reports.ts              # GET/PATCH notificationEmail
+│   │       ├── ingest.ts                   # Capture POST (Bearer/cookie)
+│   │       ├── triage.ts                   # GET pending entries
+│   │       ├── entries/[id].ts             # PATCH edit/confirm/discard
+│   │       ├── journal/
+│   │       │   ├── ingest.ts               # Direct JOURNAL (Bearer/x-api-key)
+│   │       │   ├── tags.ts                 # GET agregované tagy s počty
+│   │       │   └── entries/                # index (GET list/POST manual) + [id] (PATCH/DELETE)
+│   │       ├── health-ingest.ts            # HAE endpoint (x-api-key)
+│   │       ├── health/
+│   │       │   ├── summary.ts              # GET agregovaná data per typ
+│   │       │   ├── analyze.ts              # POST manuální AI analýza
+│   │       │   └── analyses/               # index (GET) + [id] (GET/DELETE)
+│   │       ├── cron/
+│   │       │   └── monthly-health-report.ts  # x-cron-key auth
+│   │       └── ai/chat.ts                  # Gemini chat proxy
+│   │
+│   ├── layouts/
+│   │   ├── Base.astro                      # HTML kostra + fonty + globální CSS
+│   │   └── Shell.astro                     # Sidebar + topbar (chráněné stránky)
+│   │
+│   ├── components/
+│   │   ├── ui/                             # Button (CVA variants), Input
+│   │   ├── LoginForm.tsx                   # Multi-step login
+│   │   ├── LogoutButton.tsx
+│   │   ├── SidebarToggle.tsx               # Mobile off-canvas
+│   │   ├── TokensManager.tsx               # /settings/tokens
+│   │   ├── ReportsSettings.tsx             # /settings/reports
+│   │   ├── ShortcutsGuide.tsx              # /settings/shortcuts (iPhone návod)
+│   │   ├── IngestSetupGuide.tsx            # /settings/ingest (HAE návod)
+│   │   ├── TriageList.tsx                  # /triage karty + edit
+│   │   ├── CaptureForm.tsx                 # /capture textarea
+│   │   ├── JournalFeed.tsx                 # /journal feed + search + tagy + date range
+│   │   └── health/
+│   │       ├── HealthDashboard.tsx         # KPI + sections + tabs
+│   │       ├── HealthCharts.tsx            # Recharts wrappers
+│   │       ├── HealthAnalyzeModal.tsx      # Modal pro ruční AI analýzu
+│   │       └── HealthAnalysesList.tsx      # Historie uložených analýz
+│   │
+│   ├── lib/
+│   │   ├── db.ts                           # Prisma lazy singleton (Proxy)
+│   │   ├── env.ts                          # zod + lazy Proxy
+│   │   ├── session.ts                      # JWT cookie session (AstroCookies)
+│   │   ├── rate-limit.ts                   # LoginAttempt-based limits
+│   │   ├── tokens.ts                       # API tokens (argon2 hash + verify)
+│   │   ├── webauthn.ts                     # WebAuthn helpers + preauth/challenge
+│   │   ├── classifier.ts                   # Gemini prompt pro Capture
+│   │   ├── journal-redact.ts               # Gemini prompt pro Deník redakci
+│   │   ├── health-parser.ts                # HAE JSON → DB rows
+│   │   ├── health-import.ts                # Bulk insert s skipDuplicates
+│   │   ├── health-query.ts                 # Agregace + stats + trend
+│   │   ├── health-analyze.ts               # Gemini Pro analýza
+│   │   ├── mailer.ts                       # Resend wrapper + log fallback
+│   │   ├── gemini.ts                       # Gemini client (DEFAULT_MODEL, ANALYSIS_MODEL)
+│   │   └── cn.ts                           # twMerge + clsx
+│   │
+│   ├── middleware.ts                       # Astro middleware: auth proxy + security headers
+│   ├── styles/global.css                   # Tailwind + shadcn tokeny + glass utility
+│   └── generated/prisma/                   # Prisma client (gitignored)
+│
+├── prisma/
+│   ├── schema.prisma                       # 11 modelů, 5 enumů
+│   ├── migrations/                         # 9 migrací
+│   └── seed.ts                             # Admin user z ENV
+│
+├── prisma.config.ts                        # Prisma 7 config
+├── astro.config.mjs                        # Astro + Node adapter + React + Tailwind
+├── tsconfig.json                           # Strict + paths @/*
+│
+├── Dockerfile                              # 4-stage: base, deps, prod-deps, builder, runner
+├── docker-entrypoint.sh                    # chown → heal → migrate → start
+├── docker-compose.yml                      # app + postgres (produkce)
+├── docker-compose.dev.yml                  # jen postgres (dev)
+├── .dockerignore
+├── .env.example                            # šablona pro produkční .env
+│
+├── .github/workflows/docker-build.yml      # Build + push ghcr.io
+│
+├── scripts/
+│   ├── heal-migrations.mjs                 # Čistí stuck _prisma_migrations
+│   ├── issue-smoke-token.ts                # Dev-only: vytvoří ApiToken pro testy
+│   └── import-health-export.ts             # Jednorázový import HAE JSON
+│
+├── public/
+│   └── favicon.svg                         # Pastelový gradient „R"
+│
+├── CLAUDE.md                               # Instrukce pro AI agenty
+├── AGENTS.md                               # Trigger pro Claude aby četl docs
+├── HANDBOOK.md                             # ← tento soubor
+└── SYNOLOGY_DEPLOY_PATTERN.md              # Referenční deploy pattern
+```
+
+---
+
+## Datový model
+
+### Auth
+- **User** — single user Gideon. `username` unique, `passwordHash` (argon2id), `lastLoginAt`, **`notificationEmail`** (kam chodí zdravotní reporty, override env).
+- **Session** — DB záznam pro JWT cookie, 7denní TTL.
+- **WebauthnCredential** — passkey per user.
+- **LoginAttempt** — rate-limit tabulka.
+
+### Capture
+- **Recording** — surový vstup (`rawText`), `source`, `processedAt`, `processingError`.
+- **Entry** — klasifikovaná položka.
+  - `type: TASK | JOURNAL | THOUGHT | CONTEXT | KNOWLEDGE`
+  - `status: PENDING | CONFIRMED | DISCARDED`
+  - TASK: `suggestedProject`, `suggestedWhen`, `rationale`
+  - KNOWLEDGE: `knowledgeCategory`, `knowledgeUrl`, `knowledgeTags[]`
+  - **JOURNAL (obecné): `hashtags[]` (AI redakce), `location Json?` (GPS z iPhonu)**
+  - `rawExcerpt`, `createdAt`, `confirmedAt`
+
+### Tokens
+- **ApiToken** — `name`, `tokenHash` (argon2 unique), `prefix`, `lastUsedAt`, `revokedAt`. Používá se pro Capture Bearer tokens, Journal direct, Health ingest.
+
+### Health
+- **HealthMetric** — univerzální tabulka pro 17 HAE typů.
+  - `type`, `recordedAt`, `source`, `unit`
+  - `qty` (14 metrik), `bpSystolic`/`bpDiastolic`, `sleepData` JSONB
+  - `raw` JSONB
+  - **`@@unique([userId, type, recordedAt, source])`** — idempotent ingest
+- **HealthEcg** — voltage samples v JSONB.
+- **HealthAnalysis** — AI analýzy (manuální + měsíční auto).
+  - `periodFrom`, `periodTo`, `focus`, `trigger: MANUAL | MONTHLY_AUTO`
+  - `text` (markdown odpověď), `model`, stats
+  - `emailSentAt`, `emailError`
+
+### Enums
+- `RecordingSource`, `EntryType`, `TaskWhen`, `EntryStatus`, `AnalysisTrigger`
+
+---
+
+## Moduly — aktuální stav
+
+### ✅ Auth (hotovo)
+Heslo + passkey (WebAuthn). Viz [Auth](#auth).
+
+### ✅ Capture (hotovo, Iterace 1 + KNOWLEDGE dodatek)
+- Diktát → klasifikace → triage → potvrdit/zahodit
+- `POST /api/ingest` (Bearer token z iPhone Shortcutu, nebo session cookie z `/capture`)
+- Gemini 2.5 Flash rozdělí input na N entries s typem
+- **5 typů**: TASK, JOURNAL, THOUGHT, CONTEXT, KNOWLEDGE
+- UI: `/triage` — glass karty s pastelovou ikonou per typ, click-to-edit, „Změnit typ" dropdown (všech 5)
+- Klasifikační přesnost ověřena na 16 reálných vstupech: **100 %**
+
+### ✅ Deník (hotovo)
+Samostatný modul s vlastním direct endpointem.
+- `POST /api/journal/ingest` (Bearer / x-api-key, nebo session) — **bypass klasifikátoru**, rovnou `CONFIRMED`
+- **AI redakce** přes Gemini Flash — vyčistí text, opraví gramatiku, doplní 3-5 hashtagů (temp 0.2, striktní prompt)
+- **Raw text se vždy ukládá do `Recording.rawText`** jako fallback
+- **Lokace** (volitelné) — `{ lat, lng, name?, accuracy? }` z iPhone Shortcutu
+- UI: `/journal` — chronologický feed (Dnes / Včera / dny / měsíce)
+  - **Fulltext search** (300 ms debounce)
+  - **Date range filter** (7d / 30d / 90d / letos / vše / vlastní)
+  - **Hashtag panel** — top 10 chips + expand se search boxem
+  - **Pagination** — 30 zápisů/stránka + „Načíst starší"
+  - **Origin toggle** per zápis (redigovaný ↔ raw)
+  - **MapPin badge** odkaz na Apple/Google Maps
+  - Nový zápis tlačítkem („Uložit 1:1" nebo „Uložit + učesat")
+
+### ✅ Zdraví (hotovo)
+- `POST /api/health-ingest` (x-api-key pro HAE, Bearer fallback)
+- Univerzální tabulka pro 17 metrik + ECG
+- **Historický roční import** 3 465 metrik za ~1 s
+- **Idempotent** díky unique indexu
+- Dashboard `/health` — 6 sekcí: Přehled / Aktivita / Srdce / Spánek / Tělo / Tlak
+  - KPI karty s trendem, date range filter, Recharts (Line/Area/Bar/Stacked)
+- **Manuální AI analýza** — tlačítko „Analyzovat" → modal s date range + focus presety → Gemini 2.5 Pro → markdown output
+- **Historie analýz** — seznam pod dashboardem, detail modal, smazat
+- **Měsíční automat** — `POST /api/cron/monthly-health-report` s `x-cron-key` auth, Synology Task Scheduler, poslední den v měsíci, email přes Resend
+
+### ✅ Settings (hotovo)
+Skupina v sidebaru, pět podstránek:
+- `/settings/tokens` — správa API tokenů (create/list/revoke)
+- `/settings/reports` — notification email (kam posílat)
+- `/settings/shortcuts` — návod pro 2 iPhone Shortcuty (Capture + Deník)
+- `/settings/ingest` — návod pro Health Auto Export aplikaci
+
+### 🔜 V plánu
+- **Todoist dispatch** (Iterace 2 Capture) — potvrzený TASK se pushne do Todoistu
+- **Knihovna** (Iterace 3) — samostatná stránka pro KNOWLEDGE entries, filtry, fulltext
+- **Ranní briefing** — Gemini shrne včerejšek + dnešek, denní cron
+- **Úkoly modul** — kanban view pro CONFIRMED TASK entries
+- **Poznámky / Kalendář / Kontakty / Finance / Soubory** — po jednom
+- **AI chat** — konverzační interface nad vlastními daty (RAG nad Recordings + Entries + Health)
+- **Claude kouč** — integrace na Anthropic projekt (pokud přes API)
+- **Superlist / Plaud** — externí integrace
+
+---
+
+## Auth
+
+Dvoufázový login: **heslo → passkey**. Plná implementace v `src/lib/session.ts` + `src/lib/webauthn.ts` + `src/pages/api/auth/*`.
+
+Flow:
+1. `POST /api/auth/login` — argon2 verify + rate-limit → vystaví `rs_preauth` cookie (JWT, 5 min)
+2. Browser volá `navigator.credentials.create()` nebo `.get()` → Touch ID
+3. `POST /api/auth/passkey/{register,auth}-verify` → plná session cookie `rs_session` (7 dní)
+
+Bezpečnostní vrstvy:
+- argon2id, OWASP 2024 parametry
+- Konstantní čas (dummy hash pro neexistujícího usera)
+- Rate limit 5 failů/15 min per username, 20 per IP
+- JWT cookie `httpOnly`, `sameSite: strict`, `secure` v produkci
+- Session validace VŽDY přes DB
+- WebAuthn vázaný na doménu (`rpID` z `APP_URL`) — **dev passkey v produkci NEFUNGUJE**, a naopak
+- Security headers přes middleware: HSTS, X-Frame-Options: DENY, atd.
+
+**Middleware** (`src/middleware.ts`) dělá jen optimistic check (cookie exists). Plná validace v handlerech přes `readSession(cookies)`.
+
+Public paths (nepožadují cookie):
+- `/login`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/passkey/*`
+- `/api/ingest` (Bearer), `/api/journal/ingest` (Bearer/x-api-key)
+- `/api/health-ingest` (x-api-key)
+- `/api/cron/*` (x-cron-key)
+- `/_astro/*` (static assets)
+
+---
+
+## Gemini modely
+
+V `src/lib/gemini.ts`:
+
+```ts
+export const DEFAULT_MODEL = "gemini-2.5-flash";   // default, rychlý, levný
+export const FAST_MODEL = "gemini-2.5-flash";      // alias (= default)
+export const ANALYSIS_MODEL = "gemini-2.5-pro";    // analýzy
+```
+
+Kde co:
+
+| Použití | Model | Lib |
+|---|---|---|
+| Capture klasifikace | Flash | `src/lib/classifier.ts` |
+| Journal AI redakce (učesání + hashtagy) | Flash | `src/lib/journal-redact.ts` |
+| Health analýza (manual + měsíční cron) | **Pro** | `src/lib/health-analyze.ts` |
+| AI chat | Flash | `src/pages/api/ai/chat.ts` |
+
+Flash = primary. Pro jen tam, kde kvalita > rychlost a cena (zdravotní analýza je zásadní, za pár haléřů stojí).
+
+---
+
+## API reference
+
+Všechny endpointy: `export const prerender = false`, JSON payload, zod validace.
+
+### Auth
+| Method | Path | Auth | Popis |
+|---|---|---|---|
+| POST | `/api/auth/login` | — | password → preauth cookie |
+| POST | `/api/auth/logout` | session | destroy session |
+| GET | `/api/auth/me` | session | current user info |
+| POST | `/api/auth/passkey/register-options` | preauth | WebAuthn register challenge |
+| POST | `/api/auth/passkey/register-verify` | preauth | verify & save credential → session |
+| POST | `/api/auth/passkey/auth-options` | preauth | WebAuthn auth challenge |
+| POST | `/api/auth/passkey/auth-verify` | preauth | verify assertion → session |
+
+### Tokens
+| Method | Path | Auth | Body | Poznámka |
+|---|---|---|---|---|
+| GET | `/api/tokens` | session | — | |
+| POST | `/api/tokens` | session | `{name}` | Plain token vrácen **jen jednou** |
+| DELETE | `/api/tokens/:id` | session | — | Soft-delete (`revokedAt`) |
+
+### Settings
+| Method | Path | Auth | Body |
+|---|---|---|---|
+| GET | `/api/settings/reports` | session | — |
+| PATCH | `/api/settings/reports` | session | `{notificationEmail}` |
+
+### Capture
+| Method | Path | Auth | Body |
+|---|---|---|---|
+| POST | `/api/ingest` | Bearer / session | `{text, source}` |
+| GET | `/api/triage` | session | — |
+| PATCH | `/api/entries/:id` | session | `{text?, type?, suggestedProject?, suggestedWhen?, knowledgeCategory?, knowledgeUrl?, knowledgeTags?, status?}` |
+
+Rate limit `/api/ingest`: **100 / 24 h** per user.
+
+### Journal
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| POST | `/api/journal/ingest` | Bearer / x-api-key / session | `{text, source?, location?, skipRedact?}` |
+| GET | `/api/journal/entries` | session | `?q&tag&from&to&limit&offset` |
+| POST | `/api/journal/entries` | session | `{text, redact?, location?}` |
+| GET | `/api/journal/tags` | session | — (vrací `[{tag, count}]` desc) |
+| PATCH | `/api/journal/entries/:id` | session | `{text}` |
+| DELETE | `/api/journal/entries/:id` | session | — (soft delete) |
+
+Rate limit `/api/journal/ingest`: **200 / 24 h** per user.
+
+### Health
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| POST | `/api/health-ingest` | x-api-key / Bearer | HAE JSON payload |
+| GET | `/api/health/summary` | session | `?from&to` |
+| POST | `/api/health/analyze` | session | `{from, to, focus?}` |
+| GET | `/api/health/analyses` | session | `?limit` |
+| GET | `/api/health/analyses/:id` | session | — |
+| DELETE | `/api/health/analyses/:id` | session | — |
+
+Rate limit `/api/health/analyze`: **10 / 24 h** per user (Gemini Pro guard).
+
+### Cron
+| Method | Path | Auth | Query |
+|---|---|---|---|
+| POST | `/api/cron/monthly-health-report` | **x-cron-key** | `?from&to` (override; jinak předchozí celý měsíc) |
+
+### AI
+| Method | Path | Auth | Body |
+|---|---|---|---|
+| POST | `/api/ai/chat` | session | `{prompt, fast?}` |
+
+---
+
+## Design system
+
+### Token layer (v `src/styles/global.css`)
+
+Shadcn-style CSS proměnné s OKLCH, mapovány do Tailwind v4 přes `@theme inline`:
+
+```
+--background     oklch(14% 0.025 260)   hluboká půlnoční modř
+--foreground     oklch(98% 0.01 240)    téměř bílý text
+--card           oklch(100% 0 0 / 0.045)  glass card wash
+--primary        oklch(82% 0.12 45)     peach (CTA)
+```
+
+Pastelové tinty:
+
+| Tint | Modul |
+|---|---|
+| peach | Úkoly / TASK / Capture Shortcut |
+| mint | Poznámky |
+| lavender | Kontakty / THOUGHT |
+| sky | Kalendář / CONTEXT |
+| sage | Finance / success |
+| butter | **Deník / JOURNAL / warning** |
+| rose | AI / Zdraví / error |
+| pink | Soubory |
+
+### Glass utility
+
+Tři úrovně:
+- `.glass-subtle` — blur 12 px, 2.5 % white
+- `.glass` — blur 24 px, 4.5 % white (default karta)
+- `.glass-strong` — blur 32 px, 8 % white (modal/login)
+
+### Typografie
+- **Fraunces** (variabilní serif) pro h1/h2/h3 a dekorativní nadpisy
+- **Geist** sans pro body
+- **Geist Mono** pro datumy, ID, metadata
+- Base font-size 15.5 px, letter-spacing -0.015em u nadpisů
+
+### Ikony
+
+**Lucide** všude. Astro: `<Icon name="lucide:check-square" />` (`astro-icon` + `@iconify-json/lucide`). React: `import { Check } from "lucide-react"`.
+
+### Responsive
+- Desktop: sidebar 260 px + main
+- Mobile (< `lg`): sidebar off-canvas + menu button v topbaru (`SidebarToggle` React island)
+
+### Pravidla
+1. **Kontrast je must** (Petr starší). Foreground 98 %, muted 78 %, minimum 70 %.
+2. **Každý modul má svůj tint**. Konzistence pomáhá orientaci.
+3. **Fraunces jen pro dekorativní nadpisy, ne pro data**. Čísla a tabulky v Geist/Mono.
+4. **Glass jen na top-level containery**. Uvnitř karty clean Tailwind.
+5. **Data hustá, dekorace skromná**.
+
+---
+
+## Vývojový workflow
+
+### Scripty
+
+```bash
+npm run dev              # Astro dev
+npm run build            # produkční build do dist/
+npm run preview          # náhled produkčního buildu
+npm run start            # spustí node ./dist/server/entry.mjs
+
+npm run db:migrate       # prisma migrate dev
+npm run db:generate      # prisma generate
+npm run db:seed          # vytvoří admin user z env
+npm run db:studio        # Prisma Studio GUI
+
+npm run health:import -- <path> [username]
+                         # jednorázový import HAE JSON
+```
+
+### Přidání nové migrace
+
+```bash
+# 1. uprav prisma/schema.prisma
+# 2. npm run db:migrate  (promptne na název)
+# 3. npm run db:generate (regen TS typy)
+# 4. Restart dev serveru
+```
+
+Produkce: entrypoint automaticky volá `prisma migrate deploy` před startem.
+
+### Přidání nového modulu (šablona)
+
+1. **Prisma** — doplň model + migrace
+2. **lib/** — logika nezávislá na frameworku (`src/lib/yourmodule.ts`)
+3. **API** — endpointy v `src/pages/api/yourmodule/...ts` (vždy `prerender = false` + zod body + `readSession(cookies)`)
+4. **UI** — stránka v `src/pages/yourmodule.astro` obalena `<Shell>`, interaktivita v React islandech v `src/components/`
+5. **Sidebar** — v `src/layouts/Shell.astro` přepni modul na `enabled: true`
+6. **Smoke test** — curl + manual browser flow
+
+### Env vars
+
+| Proměnná | Dev | Produkce |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://raseliniste:devpassword_local_only@localhost:5433/raseliniste` | `postgresql://raseliniste:${DB_PASSWORD}@postgres:5432/raseliniste` |
+| `SESSION_SECRET` | dev string ≥32 znaků | `openssl rand -base64 48` |
+| `APP_URL` | `http://localhost:3000` | `https://www.raseliniste.cz` |
+| `GEMINI_API_KEY` | z AI Studio | stejný |
+| `NODE_ENV` | `development` | `production` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | jen pro `db:seed` | jen pro první seed na NASu |
+| `RESEND_API_KEY` | (volitelně) | aktivuje email odesílání |
+| `NOTIFICATION_FROM` | (volitelně) | odesílatel mailů (z Resend ověřené domény) |
+| `NOTIFICATION_EMAIL` | (volitelně) | default příjemce (override uživatelem v /settings/reports) |
+| `CRON_SECRET` | (volitelně) | shared secret pro `x-cron-key` |
+
+**Nikdy necommituj** `.env.local`, `.env`. `env.example` je šablona.
+
+---
+
+## Deploy na Synology
+
+Plný postup v `SYNOLOGY_DEPLOY_PATTERN.md`. Zkráceně:
+
+1. **GitHub repo** (private OK). Push na `main` → GitHub Actions build → image `ghcr.io/<user>/<repo>/app:latest`.
+2. **Image public** — ghcr.io Package → Change visibility → Public.
+3. **DNS**: `A www.raseliniste.cz → IP NASu`.
+4. **Router**: port forward 80 + 443.
+5. **DSM Certificate**: Let's Encrypt pro doménu.
+6. **DSM Reverse Proxy**: `https://www.raseliniste.cz:443` → `http://localhost:3333`.
+7. **DSM Web Station**: smaž „Výchozí server" (zabírá 443).
+8. **DSM Container Manager → Project**:
+   - Create `raseliniste`
+   - Upload `docker-compose.yml`
+   - Create `.env` vedle něj (vše z `.env.example` vyplň)
+   - Build → Start
+9. **První seed**: Container `raseliniste_app` → Terminal → `npm run db:seed`.
+10. Browser: `https://www.raseliniste.cz/login` → přihlas se (heslo z `ADMIN_PASSWORD`) → **enrollni nový passkey** (produkční doména) → v `/settings/tokens` vytvoř tokeny → v `/settings/reports` nastav email.
+
+**Důležité pro WebAuthn**: `APP_URL` v produkčním `.env` MUSÍ být `https://www.raseliniste.cz`. Passkey je vázaný na hostname — lokální passkey v produkci neprojde.
+
+**Update flow**: git push → Actions buildnou → na NASu: Container Manager → Image → Pull latest → Project → Restart.
+
+---
+
+## Email (Resend)
+
+Bez tohoto kroku se maily neodesílají (systém jen loguje do konzole, nic jinak nepadá).
+
+1. Registrace na `resend.com` (zdarma 3 000 mailů / měsíc).
+2. **Domains → Add Domain** → `raseliniste.cz`.
+3. Resend ukáže **TXT (SPF, DKIM) + MX** záznamy. Přidej je u registrátora (Forpsi / kdokoli).
+4. Počkej na ověření (10-30 min).
+5. **API Keys → Create** → zkopíruj → do `.env` jako `RESEND_API_KEY`.
+6. `NOTIFICATION_FROM=reports@raseliniste.cz` (nebo jiná adresa na ověřené doméně).
+7. `NOTIFICATION_EMAIL=<tvoje soukromá adresa>` (nebo ji nech prázdnou a nastav v `/settings/reports`).
+8. Restart kontejneru.
+
+**Hierarchie příjemce** (v cron endpointu):
+1. `User.notificationEmail` (z `/settings/reports`) — per-user override
+2. `env.NOTIFICATION_EMAIL` — globální default
+3. Pokud ani jedno → mail se neodešle, analýza se stále uloží do archivu
+
+---
+
+## Cron na Synology
+
+### Měsíční health report
+
+1. **Control Panel → Task Scheduler → Create → Scheduled Task → User-defined script**
+2. **Schedule**: Monthly, Last day, 23:00
+3. **Run command**:
+   ```bash
+   curl -fsS -X POST https://www.raseliniste.cz/api/cron/monthly-health-report \
+        -H "x-cron-key: <CRON_SECRET>" \
+        --max-time 120
+   ```
+4. Test: pravý klik na task → **Run**
+5. Ověření: `/health` → Uložené analýzy → nová s badge „měsíční"
+
+### Backfill (retro-analyzovat starší měsíc)
+
+```bash
+curl -X POST "https://www.raseliniste.cz/api/cron/monthly-health-report?from=2026-03-01T00:00:00Z&to=2026-03-31T23:59:59Z" \
+     -H "x-cron-key: $CRON_SECRET"
+```
+
+---
+
+## iPhone Shortcuty a HAE
+
+V aplikaci si postavíš tři integrace (návody jsou v aplikaci Rašeliniště přímo):
+
+### 1. Capture Shortcut
+- `/settings/shortcuts` → karta **Rasel Capture** (peach)
+- Obecný diktát → Gemini klasifikuje → triage
+- Endpoint: `POST /api/ingest`, header `Authorization: Bearer <TOKEN>`
+
+### 2. Deník Shortcut
+- `/settings/shortcuts` → karta **Rasel Deník** (butter)
+- **Přímý zápis do deníku** — bez klasifikace, rovnou CONFIRMED
+- **Volitelně** `Get Current Location` → lokace se zapíše do `/journal` jako MapPin badge
+- Endpoint: `POST /api/journal/ingest`, header `x-api-key: <TOKEN>`
+
+### 3. Health Auto Export
+- `/settings/ingest` — kompletní 6-krokový návod
+- Aplikace HAE (Premium, ~3 €/měs) → REST API → POST na `/api/health-ingest`
+- Frequency: Daily, aggregation: Daily
+- Header `x-api-key: <TOKEN>`
+
+Všechny 3 používají stejný typ **API tokenu** (z `/settings/tokens`). Můžeš mít 1 univerzální nebo 3 separátní (doporučuju separátní — snadno revokuješ jen jeden).
+
+---
+
+## Provoz a troubleshooting
+
+### Backup databáze
+
+```bash
+docker exec raseliniste_db pg_dump -U raseliniste raseliniste | gzip > /volume1/backup/rasel-$(date +%F).sql.gz
+```
+
+DSM Task Scheduler, denně v noci. Obnova:
+
+```bash
+gunzip -c rasel-2026-04-20.sql.gz | docker exec -i raseliniste_db psql -U raseliniste -d raseliniste
+```
+
+### Časté problémy
+
+**EACCES na volume.** Entrypoint to řeší sám (`chown -R 1001:1001 /data`). Pokud ne, Docker volume byl vytvořený jako root. Container Manager → Project → Clear → znovu Start.
+
+**P3009 failed migrations.** `scripts/heal-migrations.mjs` se pouští v entrypointu před `migrate deploy` — maže stuck rows. Pokud to nestačí, v terminálu: `npm run db:studio`, najdi `_prisma_migrations`, smaž selhanou migraci.
+
+**`Cannot read properties of undefined (reading 'createMany')`.** Dev server drží starý Prisma client. Kill dev, `npx prisma generate`, restart.
+
+**WebAuthn selže na produkci po deploy.** `rpID` musí odpovídat hostname v `APP_URL`. Passkey z `localhost` nefunguje na `raseliniste.cz`. Po deploy enrollni nový.
+
+**Gemini `429 RESOURCE_EXHAUSTED`.** Free tier má denní limit. Studio → Billing → paid (pro single user v praxi unlimited).
+
+**Port 3000 zabraný.** Lokální dev 3000, NAS 3333. Změň dev port: `astro dev -p 3333`.
+
+**`Cross-site POST form submissions are forbidden`** z curl. Astro `security.checkOrigin`. Pošli `Content-Type: application/json` nebo `-H "Origin: http://localhost:3000"`.
+
+**Maily se neposílají.** Zkontroluj `RESEND_API_KEY` + `NOTIFICATION_FROM`. V dev mailer jen loguje (`[mailer] ...`), ne odesílá. V `/settings/reports` status card ti řekne, co chybí.
+
+**Cron endpoint vrací 503 CRON_NOT_CONFIGURED.** `CRON_SECRET` není v env.
+
+**Cron endpoint vrací 401 UNAUTHORIZED.** Špatný `x-cron-key` header (překlep, nebo se neshoduje s env).
+
+### Diagnostika
+
+- **Logy**: Container Manager → Logs, nebo `docker logs raseliniste_app -f`
+- **DB shell**: `docker exec -it raseliniste_db psql -U raseliniste -d raseliniste`
+- **Prisma Studio** (jen lokálně): `npm run db:studio` → http://localhost:5555
+- **Health check**: `GET /api/auth/me` — rychlá sanity kontrola že server + DB + session běží
+
+---
+
+## Roadmap
+
+Podle priority po deployi:
+
+1. **Todoist dispatch** (Iterace 2 Capture) — potvrzený TASK → Todoist API (mapování `suggestedProject` na Todoist project_id)
+2. **Knihovna** (Iterace 3) — UI pro KNOWLEDGE entries, filtry, fulltext, grupování po projektech
+3. **Ranní briefing** — Gemini Pro generuje každé ráno: co bylo včera + co čeká dnes (cron endpoint, stejný Task Scheduler pattern)
+4. **Health detaily** — klikneš na KPI kartu → detail analýza jen té metriky
+5. **Úkoly modul** — kanban nad CONFIRMED TASK entries, priority, deadliny
+6. **Poznámky / Kalendář / Kontakty / Finance / Soubory** — po jednom
+7. **AI chat + Claude kouč** — konverzační interface nad vlastními daty (RAG nad Recordings + Entries + Health)
+8. **Superlist / Plaud** — externí integrace
+
+---
+
+## Příspěvkový guide (pro Claude Code i lidi)
+
+- **Odpovídej česky, stručně.** Přímá komunikace bez vaty.
+- **Neprogramuj dopředu.** Nepřidávej abstrakce/features, které si Gideon neřekl.
+- **Před riskantními akcemi se ptej** — `git push --force`, `rm -rf`, drop DB, změny v `prisma/migrations/`.
+- **Mobilní UX** — testuj na telefonu hned po větší layoutové změně.
+- **Gemini klíč** NIKDY do client bundle. Vždy přes `/api/ai/*` proxy.
+- **Každý modul = pastelový tint.** Konzistence napříč sidebar/KPI/badge.
+- **Maximum bezpečnosti** — argon2, rate-limit, konstantní čas, ownership check, status transitions. Neřezat.
+
+---
+
+*Stav ke dni 2026-04-20: Auth + Capture + Deník + Zdraví + Settings + Cron hotové a lokálně otestované. Připraveno k prvnímu deployi na Synology.*

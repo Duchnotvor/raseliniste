@@ -1,0 +1,24 @@
+# Lokální Postgres jen pro vývoj. Spouštěj: `docker compose -f docker-compose.dev.yml up -d`
+# Data perzistentní v named volume `raseliniste_postgres_dev_data`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: raseliniste_db_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: raseliniste
+      POSTGRES_USER: raseliniste
+      POSTGRES_PASSWORD: devpassword_local_only
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - raseliniste_postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raseliniste"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  raseliniste_postgres_dev_data:

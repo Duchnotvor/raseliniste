@@ -1,0 +1,208 @@
+---
+import Shell from "../layouts/Shell.astro";
+import { prisma } from "../lib/db";
+import { readSession } from "../lib/session";
+import { Icon } from "astro-icon/components";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true, lastLoginAt: true, createdAt: true, passkeys: { select: { id: true } } },
+});
+if (!user) return Astro.redirect("/login");
+
+const fmt = (d: Date | null | undefined) =>
+  d ? new Date(d).toLocaleString("cs-CZ") : "—";
+
+type Tint = "peach" | "mint" | "lavender" | "sky" | "sage" | "butter" | "rose" | "pink";
+
+const kpis: { label: string; value: string; delta?: string; deltaDir?: "up" | "down" | "flat"; icon: string; tint: Tint }[] = [
+  { label: "Otevřené úkoly",  value: "—", delta: "—",   deltaDir: "flat", icon: "lucide:check-square",  tint: "peach" },
+  { label: "Poznámky týden",  value: "—", delta: "—",   deltaDir: "flat", icon: "lucide:notebook-pen",  tint: "mint" },
+  { label: "Události dnes",   value: "—", delta: "—",   deltaDir: "flat", icon: "lucide:calendar",      tint: "sky" },
+  { label: "Passkey",         value: user.passkeys.length.toString(), delta: "aktivní", deltaDir: "up", icon: "lucide:fingerprint", tint: "lavender" },
+];
+
+const activity = [
+  { icon: "lucide:shield-check", label: "Přihlášení úspěšné",      at: fmt(user.lastLoginAt), tint: "sage" as Tint },
+  { icon: "lucide:user-plus",    label: "Účet vytvořen",           at: fmt(user.createdAt),   tint: "lavender" as Tint },
+];
+
+const modules: { icon: string; label: string; tint: Tint; status: string }[] = [
+  { icon: "lucide:check-square", label: "Úkoly",     tint: "peach",    status: "v plánu" },
+  { icon: "lucide:notebook-pen", label: "Poznámky",  tint: "mint",     status: "v plánu" },
+  { icon: "lucide:book-open",    label: "Deník",     tint: "butter",   status: "v plánu" },
+  { icon: "lucide:calendar",     label: "Kalendář",  tint: "sky",      status: "v plánu" },
+  { icon: "lucide:users",        label: "Kontakty",  tint: "lavender", status: "v plánu" },
+  { icon: "lucide:wallet",       label: "Finance",   tint: "sage",     status: "v plánu" },
+  { icon: "lucide:sparkles",     label: "AI chat",   tint: "rose",     status: "v plánu" },
+  { icon: "lucide:list-todo",    label: "Superlist", tint: "pink",     status: "v plánu" },
+];
+
+const today = new Date().toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "long" });
+---
+
+<Shell title="Dashboard · Rašeliniště" username={user.username}>
+  <div class="space-y-4">
+
+    {/* Headline */}
+    <div class="flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <div class="text-xs uppercase tracking-widest text-muted-foreground font-mono mb-1.5">
+          {today}
+        </div>
+        <h1 class="font-serif text-[2.5rem] leading-tight tracking-tight">
+          Vítej, {user.username}.
+        </h1>
+      </div>
+      <div class="text-sm font-mono text-muted-foreground tabular">
+        Poslední přihlášení: <span class="text-foreground">{fmt(user.lastLoginAt)}</span>
+      </div>
+    </div>
+
+    {/* KPI grid — glass cards, každý v pastelovém tintu */}
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {kpis.map((k) => (
+        <article
+          class="glass rounded-xl p-4 relative overflow-hidden"
+          style={`--c: var(--tint-${k.tint});`}
+        >
+          <div class="absolute -top-10 -right-10 size-24 rounded-full blur-2xl pointer-events-none" style="background: color-mix(in oklch, var(--c) 25%, transparent);"></div>
+
+          <div class="relative flex items-center justify-between">
+            <span class="text-[10px] uppercase tracking-[0.18em] font-mono text-muted-foreground">
+              {k.label}
+            </span>
+            <div class="size-7 rounded-md grid place-items-center" style="background: color-mix(in oklch, var(--c) 15%, transparent); color: var(--c);">
+              <Icon name={k.icon} class="size-3.5" />
+            </div>
+          </div>
+
+          <div class="font-serif text-[2.25rem] leading-none mt-2 tabular text-foreground">
+            {k.value}
+          </div>
+
+          {k.delta && (
+            <div class="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+              {k.deltaDir === "up" && <Icon name="lucide:trending-up" class="size-3.5" style="color: var(--tint-sage);" />}
+              {k.deltaDir === "down" && <Icon name="lucide:trending-down" class="size-3.5" style="color: var(--tint-rose);" />}
+              {k.deltaDir === "flat" && <Icon name="lucide:minus" class="size-3.5" />}
+              <span class="font-mono tabular">{k.delta}</span>
+            </div>
+          )}
+        </article>
+      ))}
+    </section>
+
+    {/* Dva sloupce: Dnes (tabulka) + Aktivita (feed) */}
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+
+      {/* "Dnes" — tabulka úkolů / událostí */}
+      <div class="lg:col-span-2 glass rounded-xl">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
+          <div>
+            <h2 class="font-serif text-xl">Dnes</h2>
+            <p class="text-xs text-muted-foreground mt-0.5">
+              Všechno, co je na dnešní den.
+            </p>
+          </div>
+          <span class="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            čeká na moduly
+          </span>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+                <th class="text-left font-normal px-5 py-2">Typ</th>
+                <th class="text-left font-normal px-5 py-2">Název</th>
+                <th class="text-left font-normal px-5 py-2">Kategorie</th>
+                <th class="text-right font-normal px-5 py-2">Čas</th>
+                <th class="text-right font-normal px-5 py-2 pr-5">Stav</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { type: "Úkol",     label: "Úkoly s termínem dnes",  cat: "Organizace", time: "—", tint: "peach" as Tint },
+                { type: "Událost",  label: "Události v kalendáři",    cat: "Kalendář",   time: "—", tint: "sky" as Tint },
+                { type: "Poznámka", label: "Nedočtené poznámky",      cat: "Organizace", time: "—", tint: "mint" as Tint },
+                { type: "Deník",    label: "Zápis dne",               cat: "Deník",      time: "—", tint: "butter" as Tint },
+              ].map((row) => (
+                <tr class="border-t border-white/5 hover:bg-white/[0.03] transition-colors">
+                  <td class="px-5 py-3">
+                    <span class="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px]" style={`background: color-mix(in oklch, var(--tint-${row.tint}) 14%, transparent); color: var(--tint-${row.tint});`}>
+                      <span class="size-1.5 rounded-full" style={`background: var(--tint-${row.tint});`}></span>
+                      {row.type}
+                    </span>
+                  </td>
+                  <td class="px-5 py-3 text-foreground">{row.label}</td>
+                  <td class="px-5 py-3 text-muted-foreground">{row.cat}</td>
+                  <td class="px-5 py-3 text-right font-mono tabular text-muted-foreground">{row.time}</td>
+                  <td class="px-5 py-3 text-right pr-5 font-mono text-muted-foreground">čeká</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Aktivita — feed */}
+      <div class="glass rounded-xl">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
+          <h2 class="font-serif text-xl">Aktivita</h2>
+          <Icon name="lucide:activity" class="size-4 text-muted-foreground" />
+        </div>
+        <ul class="divide-y divide-white/5">
+          {activity.map((a) => (
+            <li class="flex items-start gap-3 px-5 py-3.5 text-sm">
+              <div class="size-8 rounded-md grid place-items-center shrink-0" style={`background: color-mix(in oklch, var(--tint-${a.tint}) 14%, transparent); color: var(--tint-${a.tint});`}>
+                <Icon name={a.icon} class="size-4" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div>{a.label}</div>
+                <div class="text-xs text-muted-foreground font-mono tabular mt-0.5">{a.at}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    {/* Moduly v plánu — glass grid */}
+    <section class="glass rounded-xl">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
+        <div>
+          <h2 class="font-serif text-xl">Moduly v plánu</h2>
+          <p class="text-xs text-muted-foreground mt-0.5">
+            Přijdou postupně podle priority.
+          </p>
+        </div>
+        <span class="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+          {modules.length} moduly
+        </span>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 p-4 text-sm">
+        {modules.map((m) => (
+          <div
+            class="flex items-center justify-between gap-3 px-3 py-3 rounded-lg glass-subtle hover:bg-white/[0.06] transition-colors"
+            style={`--c: var(--tint-${m.tint});`}
+          >
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="size-8 rounded-md grid place-items-center shrink-0" style="background: color-mix(in oklch, var(--c) 15%, transparent); color: var(--c);">
+                <Icon name={m.icon} class="size-4" />
+              </div>
+              <span class="truncate">{m.label}</span>
+            </div>
+            <span class="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+              {m.status}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  </div>
+</Shell>

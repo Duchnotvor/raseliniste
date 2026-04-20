@@ -1,0 +1,26 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import TokensManager from "../../components/TokensManager";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+---
+
+<Shell
+  title="API tokeny · Rašeliniště"
+  username={user.username}
+  breadcrumb={[
+    { label: "Nastavení" },
+    { label: "API tokeny" },
+  ]}
+>
+  <TokensManager client:load />
+</Shell>

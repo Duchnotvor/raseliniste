@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "nodejs"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                String   @id @default(cuid())
+  username          String   @unique
+  passwordHash      String
+  createdAt         DateTime @default(now())
+  lastLoginAt       DateTime?
+
+  // Preferences (konfigurovatelné z /settings)
+  notificationEmail String?  // kam posílat health reporty; fallback na env NOTIFICATION_EMAIL
+
+  sessions     Session[]
+  passkeys     WebauthnCredential[]
+  recordings   Recording[]
+  apiTokens    ApiToken[]
+  healthMetrics HealthMetric[]
+  healthEcgs    HealthEcg[]
+  healthAnalyses HealthAnalysis[]
+}
+
+model WebauthnCredential {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId    String    @unique // base64url
+  publicKey       Bytes
+  counter         BigInt    @default(0)
+  transports      String[]  // ["internal", "hybrid", "usb", ...]
+  deviceType      String    // "singleDevice" | "multiDevice"
+  backedUp        Boolean
+  nickname        String?
+  createdAt       DateTime  @default(now())
+  lastUsedAt      DateTime?
+
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ---- Capture: ingest → klasifikace → triage ----
+
+model Recording {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+
+  source          RecordingSource
+  rawText         String
+
+  processedAt     DateTime?
+  processingError String?
+
+  createdAt       DateTime @default(now())
+
+  entries         Entry[]
+
+  @@index([userId, createdAt])
+}
+
+model Entry {
+  id               String      @id @default(cuid())
+  recordingId      String
+  recording        Recording   @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+
+  type             EntryType
+  text             String
+  rawExcerpt       String?
+
+  // Pouze pro TASK
+  suggestedProject String?
+  suggestedWhen    TaskWhen?
+  rationale        String?
+
+  // Pouze pro KNOWLEDGE
+  knowledgeCategory String?
+  knowledgeUrl      String?
+  knowledgeTags     String[] @default([])
+
+  // Obecné hashtagy (teď hlavně pro JOURNAL po AI redakci)
+  hashtags          String[] @default([])
+
+  // Volitelná lokace odkud byl záznam pořízen (GPS z iPhone Shortcutu).
+  // JSON: { lat: number, lng: number, name?: string, accuracy?: number }
+  location          Json?
+
+  status           EntryStatus @default(PENDING)
+
+  createdAt        DateTime    @default(now())
+  confirmedAt      DateTime?
+
+  @@index([recordingId])
+  @@index([status])
+}
+
+// ---- Zdravotní data (Apple Health přes Health Auto Export) ----
+
+model HealthMetric {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  // Typ metriky = přesný název z HAE (step_count, weight_body_mass,
+  // blood_pressure, sleep_analysis, heart_rate_variability, ...)
+  type        String
+  recordedAt  DateTime
+  source      String   // "Petr – Apple Watch|Pacer" apod.
+  unit        String?  // "kg", "count", "count/min", "kJ", "mmHg", "hr", ...
+
+  // 14 z 17 metrik = simple scalar (step_count, weight, HRV, kroky, ...)
+  qty         Float?
+
+  // blood_pressure special-case
+  bpSystolic  Float?
+  bpDiastolic Float?
+
+  // sleep_analysis: core/deep/rem/awake/asleep/inBed a časové rozsahy
+  // — heterogenní pole, ukládáme jako JSONB pro fulltext/analýzu později.
+  sleepData   Json?
+
+  // Raw HAE položka (pro pozdější recovery kdyby se měnila schema).
+  raw         Json?
+
+  createdAt   DateTime @default(now())
+
+  // ==== Unique constraint proti duplicitám ====
+  // Jeden zdravotní záznam je definovaný trojicí (typ, čas, zdroj).
+  // HAE tenhle tuple drží napříč exporty, takže re-ingest je bezpečný.
+  @@unique([userId, type, recordedAt, source])
+  @@index([userId, type, recordedAt])
+}
+
+model HealthAnalysis {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+
+  periodFrom      DateTime
+  periodTo        DateTime
+  focus           String?
+  trigger         AnalysisTrigger @default(MANUAL)
+
+  text            String   // markdown odpověď z Gemini
+  model           String   // "gemini-2.5-pro"
+  promptChars     Int?
+  totalSamples    Int?
+  metricsWithData Int?
+
+  emailSentAt     DateTime?
+  emailError      String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, periodFrom, periodTo])
+}
+
+enum AnalysisTrigger {
+  MANUAL
+  MONTHLY_AUTO
+}
+
+model HealthEcg {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+
+  startedAt      DateTime
+  source         String
+  classification String?  // "sinusRhythm", "atrialFibrillation", ...
+  averageHr      Float?
+
+  // Voltage samples jsou velké pole (10k+ bodů) — JSONB se komprimuje líp
+  // než samostatná tabulka, queries na EKG raw data dělat nebudeme.
+  voltageData    Json
+  symptoms       Json?
+
+  raw            Json?
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, startedAt, source])
+  @@index([userId, startedAt])
+}
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+
+  name        String
+  tokenHash   String    @unique
+  prefix      String
+
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+enum RecordingSource {
+  SHORTCUT
+  WEB
+  MANUAL
+}
+
+enum EntryType {
+  TASK
+  JOURNAL
+  THOUGHT
+  CONTEXT
+  KNOWLEDGE
+}
+
+enum TaskWhen {
+  TODAY
+  THIS_WEEK
+  SOMEDAY
+}
+
+enum EntryStatus {
+  PENDING
+  CONFIRMED
+  DISCARDED
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  username  String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([username, createdAt])
+  @@index([ip, createdAt])
+}

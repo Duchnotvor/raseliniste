@@ -1,0 +1,27 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import IngestSetupGuide from "../../components/IngestSetupGuide";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const appUrl = Astro.url.origin;
+---
+
+<Shell
+  title="Napojení Health · Rašeliniště"
+  username={user.username}
+  breadcrumb={[{ label: "Nastavení" }, { label: "Napojení Health" }]}
+>
+  <div class="max-w-3xl">
+    <IngestSetupGuide appUrl={appUrl} client:load />
+  </div>
+</Shell>

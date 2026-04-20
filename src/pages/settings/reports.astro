@@ -1,0 +1,25 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import ReportsSettings from "../../components/ReportsSettings";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+---
+
+<Shell
+  title="E-mailové reporty · Rašeliniště"
+  username={user.username}
+  breadcrumb={[{ label: "Nastavení" }, { label: "E-mailové reporty" }]}
+>
+  <div class="max-w-2xl">
+    <ReportsSettings client:load />
+  </div>
+</Shell>

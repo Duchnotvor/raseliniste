@@ -13,9 +13,13 @@
 # testing
 /coverage
 
-# next.js
+# next.js (legacy)
 /.next/
 /out/
+
+# astro
+/dist/
+/.astro/
 
 # production
 /build
@@ -30,8 +34,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (secrets) — nikdy necommitovat
 .env*
+# ale .env.example je šablona (bez secretů), tu chceme v repu
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +45,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# prisma generated client (regenerovaný přes `prisma generate` / Docker build)
+/src/generated

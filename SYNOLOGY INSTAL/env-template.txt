@@ -1,0 +1,54 @@
+# =======================================================
+# Rašeliniště — produkční .env pro Synology
+# =======================================================
+# Zkopíruj tento soubor na NAS jako `/docker/raseliniste/.env`
+# a vyplň hodnoty (všechny CHANGE_ME).
+#
+# Linux line endings (LF)! Pokud editoruješ na Mac nebo Windows,
+# ulož jako UTF-8 LF, jinak Docker bash importy rozbije na \r.
+
+# ---- Database ----
+# Heslo Postgresu. Generuj:
+#   openssl rand -base64 24 | tr -d '/+='
+DB_PASSWORD=CHANGE_ME
+
+# DATABASE_URL compose staví automaticky z DB_PASSWORD (viz docker-compose.yml).
+# Nemusíš tu vyplňovat.
+
+# ---- Session ----
+# JWT cookie secret. Generuj:
+#   openssl rand -base64 48
+SESSION_SECRET=CHANGE_ME_32_OR_MORE_CHARS
+
+# ---- App ----
+# Musí být přesná produkční doména (passkey rpID z toho odvozuje hostname).
+APP_URL=https://www.raseliniste.cz
+
+# ---- Gemini ----
+# https://aistudio.google.com/app/apikey
+GEMINI_API_KEY=
+
+# ---- Admin seed (jen pro první `npm run db:seed`) ----
+ADMIN_USERNAME=Gideon
+# Generuj:
+#   openssl rand -base64 18 | tr -d '/+=' | cut -c1-20
+ADMIN_PASSWORD=CHANGE_ME
+
+# ---- Email (Resend) ----
+# Bez klíče mailer jen loguje — systém funguje, ale měsíční report ti nepřijde.
+# https://resend.com — registrace + ověření domény raseliniste.cz.
+RESEND_API_KEY=
+# Odesílatel (musí být na ověřené doméně v Resend):
+NOTIFICATION_FROM=reports@raseliniste.cz
+# Default příjemce (lze override v /settings/reports):
+NOTIFICATION_EMAIL=
+
+# ---- Cron ----
+# Shared secret pro x-cron-key header v Synology Task Scheduler.
+# Generuj:
+#   openssl rand -base64 32
+CRON_SECRET=CHANGE_ME_32_OR_MORE_CHARS
+
+# ---- Node ----
+# Nechej jak je.
+NODE_ENV=production

@@ -1,0 +1,30 @@
+---
+import Base from "../layouts/Base.astro";
+import { Icon } from "astro-icon/components";
+---
+
+<Base title="404 · Nenalezeno">
+  <div class="min-h-screen grid place-items-center px-4 relative z-10">
+    <div class="w-full max-w-md text-center">
+      <div class="glass-strong rounded-xl p-8">
+        <div class="mx-auto size-14 rounded-full border border-border grid place-items-center bg-white/5 mb-5">
+          <Icon name="lucide:compass" class="size-6 text-primary" />
+        </div>
+        <div class="font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground mb-2">
+          404
+        </div>
+        <h1 class="font-serif text-3xl tracking-tight mb-2">Stránka nenalezena</h1>
+        <p class="text-sm text-muted-foreground mb-6">
+          Tahle cesta v rašeliništi ještě nevede nikam.
+        </p>
+        <a
+          href="/"
+          class="inline-flex items-center justify-center gap-2 h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          <Icon name="lucide:arrow-left" class="size-4" />
+          Zpět na začátek
+        </a>
+      </div>
+    </div>
+  </div>
+</Base>

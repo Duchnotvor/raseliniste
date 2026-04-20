@@ -1,0 +1,180 @@
+---
+import Base from "./Base.astro";
+import LogoutButton from "@/components/LogoutButton";
+import SidebarToggle from "@/components/SidebarToggle";
+import { Icon } from "astro-icon/components";
+
+interface Props {
+  title: string;
+  username: string;
+  heading?: string;
+  breadcrumb?: { label: string; href?: string }[];
+}
+
+const { title, username, heading, breadcrumb = [] } = Astro.props;
+const path = Astro.url.pathname;
+
+type NavItem = { href: string; label: string; icon: string; tint: string; enabled?: boolean };
+
+const nav: { group: string; items: NavItem[] }[] = [
+  { group: "Přehled", items: [
+    { href: "/", label: "Dashboard", icon: "lucide:layout-dashboard", tint: "peach", enabled: true },
+  ]},
+  { group: "Capture", items: [
+    { href: "/triage",  label: "Triage",       icon: "lucide:inbox",    tint: "peach",    enabled: true },
+    { href: "/capture", label: "Ruční vstup",  icon: "lucide:edit-3",   tint: "mint",     enabled: true },
+  ]},
+  { group: "Organizace", items: [
+    { href: "/tasks",    label: "Úkoly",     icon: "lucide:check-square", tint: "peach" },
+    { href: "/notes",    label: "Poznámky",  icon: "lucide:notebook-pen", tint: "mint" },
+    { href: "/journal",  label: "Deník",     icon: "lucide:book-open",    tint: "butter", enabled: true },
+    { href: "/calendar", label: "Kalendář",  icon: "lucide:calendar",     tint: "sky" },
+  ]},
+  { group: "Data", items: [
+    { href: "/health",   label: "Zdraví",    icon: "lucide:heart-pulse", tint: "rose", enabled: true },
+    { href: "/contacts", label: "Kontakty",  icon: "lucide:users",  tint: "lavender" },
+    { href: "/finance",  label: "Finance",   icon: "lucide:wallet", tint: "sage" },
+    { href: "/files",    label: "Soubory",   icon: "lucide:folder", tint: "pink" },
+  ]},
+  { group: "AI", items: [
+    { href: "/ai/chat",  label: "Gemini chat", icon: "lucide:sparkles", tint: "rose" },
+    { href: "/ai/coach", label: "Claude kouč", icon: "lucide:compass",  tint: "lavender" },
+  ]},
+  { group: "Integrace", items: [
+    { href: "/integrations/superlist", label: "Superlist", icon: "lucide:list-todo", tint: "mint" },
+    { href: "/integrations/plaud",     label: "Plaud",     icon: "lucide:mic",       tint: "butter" },
+  ]},
+  { group: "Nastavení", items: [
+    { href: "/settings/tokens",    label: "API tokeny",         icon: "lucide:key",       tint: "lavender", enabled: true },
+    { href: "/settings/reports",   label: "E-mailové reporty",   icon: "lucide:mail",      tint: "butter",   enabled: true },
+    { href: "/settings/shortcuts", label: "iPhone Shortcuty",    icon: "lucide:smartphone", tint: "peach",   enabled: true },
+    { href: "/settings/ingest",    label: "Napojení Health",     icon: "lucide:cable",     tint: "rose",     enabled: true },
+  ]},
+];
+
+const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+---
+
+<Base title={title}>
+  <div class="min-h-screen relative z-10 lg:grid lg:grid-cols-[260px_1fr] lg:gap-3 lg:p-3 p-2">
+    {/* Backdrop (mobile only, když je sidebar otevřený) */}
+    <div
+      class="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 opacity-0 pointer-events-none transition-opacity lg:hidden data-[open]:opacity-100 data-[open]:pointer-events-auto"
+      data-sidebar-backdrop
+    ></div>
+
+    {/* Sidebar — glass panel; lg: v gridu, pod lg: off-canvas */}
+    <aside
+      data-sidebar
+      class="glass rounded-xl flex flex-col overflow-hidden
+             lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]
+             fixed inset-y-2 left-2 w-[260px] z-40 transform -translate-x-[calc(100%+1rem)] transition-transform
+             lg:static lg:translate-x-0 lg:inset-auto lg:w-auto"
+    >
+      <div class="px-5 py-5 border-b border-white/5">
+        <a href="/" class="flex items-baseline gap-2 group">
+          <span class="font-serif text-2xl tracking-tight">Rašeliniště</span>
+          <span class="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            v0.1
+          </span>
+        </a>
+      </div>
+
+      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-5 text-sm">
+        {nav.map((section) => (
+          <div>
+            <div class="px-2 mb-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-mono">
+              {section.group}
+            </div>
+            <ul class="space-y-0.5">
+              {section.items.map((item) => {
+                const active = isActive(item.href);
+                const disabled = item.enabled === false;
+                return (
+                  <li>
+                    <a
+                      href={disabled ? "#" : item.href}
+                      aria-disabled={disabled}
+                      style={`--c: var(--tint-${item.tint});`}
+                      class:list={[
+                        "relative flex items-center gap-2.5 px-2.5 py-2 rounded-md transition-all",
+                        active
+                          ? "bg-[color-mix(in_oklch,var(--c)_16%,transparent)] text-foreground"
+                          : "text-foreground/75 hover:bg-white/5 hover:text-foreground",
+                        disabled && "opacity-45 cursor-not-allowed pointer-events-none",
+                      ]}
+                    >
+                      {active && (
+                        <span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r" style="background: var(--c);"></span>
+                      )}
+                      <Icon name={item.icon} class="size-4 shrink-0" style="color: var(--c);" />
+                      <span>{item.label}</span>
+                      {disabled && (
+                        <span class="ml-auto text-[9px] uppercase tracking-widest text-muted-foreground font-mono">
+                          soon
+                        </span>
+                      )}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      <div class="border-t border-white/5 p-3 flex items-center gap-2.5">
+        <div class="size-8 rounded-md bg-white/10 flex items-center justify-center font-serif text-foreground/90">
+          {username.slice(0, 1).toUpperCase()}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm truncate">{username}</div>
+          <div class="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            online
+          </div>
+        </div>
+        <LogoutButton client:load />
+      </div>
+    </aside>
+
+    {/* Main column — topbar + content, žádný outer glass (content karty nesou glass samy) */}
+    <div class="flex flex-col min-w-0 gap-3">
+      <header class="glass rounded-xl h-14 px-3 lg:px-5 flex items-center gap-3">
+        <SidebarToggle client:load />
+        <div class="flex items-center gap-2 text-sm text-muted-foreground">
+          {breadcrumb.length === 0 ? (
+            <span class="text-foreground">{heading ?? title}</span>
+          ) : (
+            breadcrumb.map((crumb, i) => (
+              <>
+                {crumb.href ? (
+                  <a href={crumb.href} class="hover:text-foreground transition-colors">{crumb.label}</a>
+                ) : (
+                  <span class="text-foreground">{crumb.label}</span>
+                )}
+                {i < breadcrumb.length - 1 && (
+                  <Icon name="lucide:chevron-right" class="size-3 text-muted-foreground/60" />
+                )}
+              </>
+            ))
+          )}
+        </div>
+
+        <div class="ml-auto flex items-center gap-1.5">
+          <button type="button" class="h-8 px-3 rounded-md hover:bg-white/5 text-sm text-muted-foreground flex items-center gap-2 transition-colors" aria-label="Hledat">
+            <Icon name="lucide:search" class="size-4" />
+            <span class="hidden md:inline font-mono text-xs">⌘K</span>
+          </button>
+          <button type="button" class="size-8 rounded-md hover:bg-white/5 flex items-center justify-center text-muted-foreground transition-colors" aria-label="Nastavení">
+            <Icon name="lucide:settings" class="size-4" />
+          </button>
+        </div>
+      </header>
+
+      <main class="flex-1 min-w-0 overflow-y-auto px-1 pb-3">
+        {heading && <h1 class="font-serif text-3xl mb-5 tracking-tight">{heading}</h1>}
+        <slot />
+      </main>
+    </div>
+  </div>
+</Base>

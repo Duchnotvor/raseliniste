@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: raseliniste_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: raseliniste
+      POSTGRES_USER: raseliniste
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?required}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data_v1:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raseliniste"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    # GitHub username + repo lowercase. Po prvním buildu ghcr.io/duchnotvor/raseliniste/app
+    image: ghcr.io/duchnotvor/raseliniste/app:latest
+    container_name: raseliniste_app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://raseliniste:${DB_PASSWORD}@postgres:5432/raseliniste
+      SESSION_SECRET: ${SESSION_SECRET:?required}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      APP_URL: ${APP_URL:-https://www.raseliniste.cz}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTIFICATION_FROM: ${NOTIFICATION_FROM:-}
+      NOTIFICATION_EMAIL: ${NOTIFICATION_EMAIL:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      UPLOADS_PATH: /data/uploads
+      CACHE_PATH: /data/cache
+      NODE_ENV: production
+    volumes:
+      - ./uploads:/data/uploads
+      - app_cache:/data/cache
+    ports:
+      - "3333:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data_v1:
+  app_cache:

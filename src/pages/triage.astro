@@ -1,0 +1,31 @@
+---
+import Shell from "../layouts/Shell.astro";
+import TriageList from "../components/TriageList";
+import { prisma } from "../lib/db";
+import { readSession } from "../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+---
+
+<Shell
+  title="Triage · Rašeliniště"
+  username={user.username}
+  breadcrumb={[{ label: "Capture" }, { label: "Triage" }]}
+>
+  <div class="space-y-5">
+    <div>
+      <h1 class="font-serif text-[2.25rem] leading-tight tracking-tight">Triage</h1>
+      <p class="text-sm text-muted-foreground mt-1">
+        Položky, které Gemini vytvořila z tvých nahrávek. Uprav, potvrď, nebo zahoď.
+      </p>
+    </div>
+    <TriageList client:load />
+  </div>
+</Shell>

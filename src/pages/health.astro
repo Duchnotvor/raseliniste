@@ -1,0 +1,44 @@
+---
+import Shell from "../layouts/Shell.astro";
+import HealthDashboard from "../components/health/HealthDashboard";
+import { prisma } from "../lib/db";
+import { readSession } from "../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+// Rychlý metadata pro hlavičku — kolik je v DB celkem záznamů
+const [totalMetrics, totalEcgs] = await Promise.all([
+  prisma.healthMetric.count({ where: { userId: session.uid } }),
+  prisma.healthEcg.count({ where: { userId: session.uid } }),
+]);
+---
+
+<Shell
+  title="Zdraví · Rašeliniště"
+  username={user.username}
+  breadcrumb={[{ label: "Data" }, { label: "Zdraví" }]}
+>
+  <div class="space-y-5">
+    <div class="flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="font-serif text-[2.25rem] leading-tight tracking-tight">Zdraví</h1>
+        <p class="text-sm text-muted-foreground mt-1">
+          Data z Apple Health přes Health Auto Export. Automaticky se doplňují z iPhonu.
+        </p>
+      </div>
+      <div class="text-xs font-mono text-muted-foreground tabular">
+        <span class="text-foreground">{totalMetrics.toLocaleString("cs-CZ")}</span> metrik ·
+        <span class="text-foreground">{totalEcgs}</span> EKG v DB
+      </div>
+    </div>
+
+    <HealthDashboard client:load />
+  </div>
+</Shell>
