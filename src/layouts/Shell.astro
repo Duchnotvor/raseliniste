@@ -32,7 +32,8 @@ const nav: { group: string; items: NavItem[] }[] = [
   ]},
   { group: "Data", items: [
     { href: "/health",   label: "Zdraví",    icon: "lucide:heart-pulse", tint: "rose", enabled: true },
-    { href: "/contacts", label: "Kontakty",  icon: "lucide:users",  tint: "lavender" },
+    { href: "/contacts", label: "Kontakty",  icon: "lucide:users",  tint: "lavender", enabled: true },
+    { href: "/firewall", label: "Firewall",  icon: "lucide:shield", tint: "peach",    enabled: true },
     { href: "/finance",  label: "Finance",   icon: "lucide:wallet", tint: "sage" },
     { href: "/files",    label: "Soubory",   icon: "lucide:folder", tint: "pink" },
   ]},
@@ -49,6 +50,7 @@ const nav: { group: string; items: NavItem[] }[] = [
     { href: "/settings/reports",   label: "E-mailové reporty",   icon: "lucide:mail",      tint: "butter",   enabled: true },
     { href: "/settings/shortcuts", label: "iPhone Shortcuty",    icon: "lucide:smartphone", tint: "peach",   enabled: true },
     { href: "/settings/ingest",    label: "Napojení Health",     icon: "lucide:cable",     tint: "rose",     enabled: true },
+    { href: "/settings/integrations", label: "Integrace (Todoist)", icon: "lucide:plug",     tint: "mint",     enabled: true },
   ]},
 ];
 

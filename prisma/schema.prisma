@@ -26,6 +26,9 @@ model User {
   healthMetrics HealthMetric[]
   healthEcgs    HealthEcg[]
   healthAnalyses HealthAnalysis[]
+  contacts      Contact[]
+  callLogs      CallLog[]
+  integrations  UserIntegration[]
 }
 
 model WebauthnCredential {
@@ -200,6 +203,110 @@ model HealthEcg {
 
   @@unique([userId, startedAt, source])
   @@index([userId, startedAt])
+}
+
+// ---- Gideonův Firewall: kontakty + call-log + integrace ----
+
+model Contact {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id])
+
+  displayName  String
+  firstName    String?
+  lastName     String?
+  note         String?
+  isVip        Boolean        @default(false)
+
+  importedFrom String?        // "vcard" | "manual"
+  externalId   String?        // UID z vCard, pokud má
+
+  phones       Phone[]
+  emails       ContactEmail[]
+  callLogs     CallLog[]
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([userId, isVip])
+}
+
+model Phone {
+  id        String  @id @default(cuid())
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  number    String  // normalizovaný E.164 např. "+420777123456"
+  label     String? // "mobile" | "work" | "home" | "other"
+
+  @@unique([contactId, number])
+  @@index([number]) // rychlé lookup při příchozím hovoru
+}
+
+model ContactEmail {
+  id        String  @id @default(cuid())
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  email     String
+  label     String?
+
+  @@unique([contactId, email])
+}
+
+model CallLog {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+
+  phoneNumber  String    // normalizovaný E.164 tak jak přišel
+  rawNumber    String    // jak skutečně přišel z URL (pro audit)
+  contactId    String?
+  contact      Contact?  @relation(fields: [contactId], references: [id])
+
+  message      String
+  isUrgent     Boolean   @default(false)
+  wasVip       Boolean   @default(false) // snapshot v době přijetí
+
+  ip           String?
+  userAgent    String?
+
+  todoistTaskId    String? // ID v Todoist pokud se podařilo vytvořit
+  todoistProjectId String?
+  todoistError     String? // pokud push selhal
+
+  mailSentAt   DateTime? // kdy byl odeslán email Gideonovi
+  mailError    String?
+
+  seenAt       DateTime? // Gideon označil jako vyřízené
+
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, seenAt])
+}
+
+model UserIntegration {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+
+  provider   String   // "todoist" | budoucí "superlist" | "plaud" atd.
+
+  // Encrypted credentials (AES-256-GCM, klíč odvozen ze SESSION_SECRET)
+  tokenEnc   String   // ciphertext v base64
+  tokenIv    String   // IV v base64
+  tokenTag   String   // auth tag v base64
+
+  // Per-provider konfigurace (pro Todoist: { vyruseni: projectId, vip: projectId })
+  config     Json?
+
+  lastUsedAt DateTime?
+  lastError  String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, provider])
 }
 
 model ApiToken {

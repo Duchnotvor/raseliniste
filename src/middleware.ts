@@ -3,7 +3,14 @@ import { SESSION_COOKIE } from "./lib/session";
 
 // Public stránky a endpointy, které nevyžadují session cookie.
 // Passkey flow má svou vlastní autorizaci přes rs_preauth cookie (JWT po hesle).
-const PUBLIC_PATHS = new Set<string>(["/login", "/api/auth/login"]);
+const PUBLIC_PATHS = new Set<string>([
+  "/login",
+  "/api/auth/login",
+  // Gideonův Firewall — veřejná landing pro volající.
+  "/call-log",
+  "/call-log/thanks",
+  "/api/call-log/submit",
+]);
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;

@@ -18,10 +18,14 @@ const fmt = (d: Date | null | undefined) =>
 
 type Tint = "peach" | "mint" | "lavender" | "sky" | "sage" | "butter" | "rose" | "pink";
 
-const kpis: { label: string; value: string; delta?: string; deltaDir?: "up" | "down" | "flat"; icon: string; tint: Tint }[] = [
+const unseenFirewall = await prisma.callLog.count({
+  where: { userId: session.uid, seenAt: null },
+});
+
+const kpis: { label: string; value: string; delta?: string; deltaDir?: "up" | "down" | "flat"; href?: string; icon: string; tint: Tint }[] = [
   { label: "Otevřené úkoly",  value: "—", delta: "—",   deltaDir: "flat", icon: "lucide:check-square",  tint: "peach" },
   { label: "Poznámky týden",  value: "—", delta: "—",   deltaDir: "flat", icon: "lucide:notebook-pen",  tint: "mint" },
-  { label: "Události dnes",   value: "—", delta: "—",   deltaDir: "flat", icon: "lucide:calendar",      tint: "sky" },
+  { label: "Firewall",        value: unseenFirewall.toString(), delta: unseenFirewall === 0 ? "žádné" : "nevyřízené", deltaDir: unseenFirewall > 0 ? "up" : "flat", href: "/firewall", icon: "lucide:shield", tint: "peach" },
   { label: "Passkey",         value: user.passkeys.length.toString(), delta: "aktivní", deltaDir: "up", icon: "lucide:fingerprint", tint: "lavender" },
 ];
 

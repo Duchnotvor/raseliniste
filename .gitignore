@@ -48,3 +48,7 @@ next-env.d.ts
 
 # prisma generated client (regenerovaný přes `prisma generate` / Docker build)
 /src/generated
+
+# osobní data (vCard exporty, fotky, atd.)
+/contacts/
+*.vcf

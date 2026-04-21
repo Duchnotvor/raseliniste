@@ -1,0 +1,42 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import IntegrationsSettings from "../../components/IntegrationsSettings";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const integration = await prisma.userIntegration.findUnique({
+  where: { userId_provider: { userId: session.uid, provider: "todoist" } },
+  select: { lastUsedAt: true, lastError: true, config: true, updatedAt: true },
+});
+
+const hasToken = Boolean(integration);
+const config = (integration?.config ?? {}) as { vyruseni?: string; vip?: string };
+---
+
+<Shell
+  title="Integrace · Rašeliniště"
+  username={user.username}
+  breadcrumb={[{ label: "Nastavení" }, { label: "Integrace" }]}
+>
+  <div class="max-w-2xl">
+    <IntegrationsSettings
+      client:load
+      initial={{
+        hasToken,
+        vyruseniProjectId: config.vyruseni ?? null,
+        vipProjectId: config.vip ?? null,
+        lastUsedAt: integration?.lastUsedAt?.toISOString() ?? null,
+        lastError: integration?.lastError ?? null,
+      }}
+    />
+  </div>
+</Shell>
