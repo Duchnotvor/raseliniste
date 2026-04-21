@@ -36,7 +36,36 @@ function applySecurityHeaders(response: Response): Response {
   return response;
 }
 
+/**
+ * Kanonická doména — všechen traffic směřujeme sem.
+ * Pokud jde z jiného hostname (typicky apex `raseliniste.cz`), pošleme 301.
+ * Reverse proxy na DSM ale musí propouštět správné Host header (nepřepisovat
+ * ho na `localhost`). Pokud Host je localhost (interní vývoj), nereagujeme.
+ */
+const CANONICAL_HOST = "www.raseliniste.cz";
+
+function apexRedirect(request: Request, url: URL): Response | null {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!host) return null;
+  // Lokalhost a IP adresy necháváme (dev + interní testy)
+  if (host.startsWith("localhost") || host.startsWith("127.") || /^\d+\.\d+\.\d+\.\d+/.test(host)) {
+    return null;
+  }
+  // Už jsme na kanonické doméně — nic nedělat
+  if (host === CANONICAL_HOST) return null;
+  // Redirect na kanonickou doménu se stejnou cestou
+  const target = `https://${CANONICAL_HOST}${url.pathname}${url.search}`;
+  return new Response(null, {
+    status: 301,
+    headers: { Location: target },
+  });
+}
+
 export const onRequest = defineMiddleware(async ({ request, cookies, url, redirect }, next) => {
+  // Apex → www 301 před vším ostatním (cookies, passkey vázané na hostname)
+  const apexRedir = apexRedirect(request, url);
+  if (apexRedir) return apexRedir;
+
   if (isPublic(url.pathname)) {
     return applySecurityHeaders(await next());
   }
