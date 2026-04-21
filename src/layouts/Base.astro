@@ -7,9 +7,11 @@ import "@/styles/global.css";
 interface Props {
   title: string;
   description?: string;
+  appleTitle?: string;          // název pod ikonou na ploše iPhone
+  appleCapable?: boolean;        // otevřít jako "appka" bez Safari chromu
 }
 
-const { title, description = "" } = Astro.props;
+const { title, description = "", appleTitle, appleCapable = false } = Astro.props;
 ---
 
 <!doctype html>
@@ -20,7 +22,12 @@ const { title, description = "" } = Astro.props;
     <meta name="robots" content="noindex, nofollow" />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0920" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    {appleTitle && <meta name="apple-mobile-web-app-title" content={appleTitle} />}
+    {appleCapable && <meta name="apple-mobile-web-app-capable" content="yes" />}
+    {appleCapable && <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />}
     <title>{title}</title>
   </head>
   <body class="min-h-screen bg-base-100 text-base-content antialiased">

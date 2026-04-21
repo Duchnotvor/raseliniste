@@ -12,7 +12,11 @@ const prefillPhone =
 const prefillName = url.searchParams.get("name") ?? "";
 ---
 
-<Base title="Zpráva pro Gideona">
+<Base
+  title="Vzkaz Gideonovi"
+  appleTitle="Vzkaz Gideonovi"
+  appleCapable={true}
+>
   <div class="min-h-screen grid place-items-center px-4 py-8 relative z-10">
     <div class="w-full max-w-md">
       <div class="mb-6 text-center">
