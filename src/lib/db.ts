@@ -13,10 +13,12 @@ function createClient(): PrismaClient {
 }
 
 function getPrisma(): PrismaClient {
+  // Vždy cachovat globálně. Server je long-running (Node adapter na NASu),
+  // takže potřebujeme recyklovat connection pool. Bez cache by každý
+  // `prisma.X` přístup vytvořil nový pg.Pool → stovky connections → DB timeout
+  // → readSession() vrátí null → UNAUTHENTICATED na druhém chunku importu.
   if (!globalForPrisma.prisma) {
-    const client = createClient();
-    if (env.NODE_ENV !== "production") globalForPrisma.prisma = client;
-    return client;
+    globalForPrisma.prisma = createClient();
   }
   return globalForPrisma.prisma;
 }
