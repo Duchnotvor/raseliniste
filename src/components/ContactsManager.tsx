@@ -79,18 +79,46 @@ export default function ContactsManager() {
   }
 
   async function importVcf(file: File) {
-    setImportMsg("Importuji…");
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/api/contacts/import", { method: "POST", body: fd });
-    const data = await res.json();
-    if (res.ok) {
-      setImportMsg(`Hotovo: ${data.created} nových, ${data.updated} aktualizováno, ${data.skipped} přeskočeno.`);
-      load();
-    } else {
-      setImportMsg(`Chyba: ${data.error}`);
+    const text = await file.text();
+    const CHUNK = 50;
+    let offset = 0;
+    let total = 0;
+    let created = 0, updated = 0, skipped = 0;
+    const allErrors: string[] = [];
+
+    setImportMsg("Importuji… 0 %");
+
+    while (true) {
+      const res = await fetch("/api/contacts/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, offset, limit: CHUNK }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setImportMsg(`Chyba u offsetu ${offset}: ${data.error ?? res.statusText}`);
+        setTimeout(() => setImportMsg(null), 8000);
+        return;
+      }
+      const data = await res.json();
+      total = data.total;
+      created += data.created;
+      updated += data.updated;
+      skipped += data.skipped;
+      if (data.errors?.length) allErrors.push(...data.errors);
+
+      const pct = Math.round((data.processed / total) * 100);
+      setImportMsg(`Importuji… ${pct} % (${data.processed}/${total})`);
+      load(); // průběžný refresh seznamu
+
+      if (data.done) break;
+      offset = data.nextOffset;
     }
-    setTimeout(() => setImportMsg(null), 6000);
+
+    const errSuffix = allErrors.length > 0 ? ` · ${allErrors.length} chyb` : "";
+    setImportMsg(`✓ Hotovo: ${created} nových, ${updated} aktualizováno, ${skipped} přeskočeno${errSuffix}`);
+    load();
+    setTimeout(() => setImportMsg(null), 10000);
   }
 
   return (

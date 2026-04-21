@@ -8,16 +8,21 @@ export const prerender = false;
 
 /**
  * POST /api/contacts/import
- * Body: multipart/form-data s polem `file` (.vcf)
- *    nebo JSON { text: string } s raw obsahem vCard.
+ * Body: multipart/form-data s polem `file` (.vcf), volitelně `offset`, `limit`
+ *    nebo JSON { text: string, offset?, limit? } s raw obsahem vCard.
  *
  * Dedup: shoda podle externalId (UID), jinak podle displayName + prvního telefonu.
+ * Chunking: klient posílá dávky po `limit` kontaktech (default 50) s `offset`,
+ *    aby nenarazil na nginx 60s timeout u velkých .vcf.
  */
 export const POST: APIRoute = async ({ request, cookies }) => {
   const session = await readSession(cookies);
   if (!session) return Response.json({ error: "UNAUTHENTICATED" }, { status: 401 });
 
   let text = "";
+  let offset = 0;
+  let limit = 50;
+
   const ct = request.headers.get("content-type") ?? "";
   if (ct.includes("multipart/form-data")) {
     const fd = await request.formData();
@@ -26,24 +31,34 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       return Response.json({ error: "Nahraj .vcf soubor." }, { status: 400 });
     }
     text = await file.text();
+    const oRaw = fd.get("offset");
+    const lRaw = fd.get("limit");
+    if (typeof oRaw === "string") offset = Math.max(0, parseInt(oRaw, 10) || 0);
+    if (typeof lRaw === "string") limit = Math.max(1, Math.min(200, parseInt(lRaw, 10) || 50));
   } else {
     const body = await request.json().catch(() => null);
     if (!body?.text || typeof body.text !== "string") {
       return Response.json({ error: "Chybí text vCard." }, { status: 400 });
     }
     text = body.text;
+    if (typeof body.offset === "number") offset = Math.max(0, body.offset);
+    if (typeof body.limit === "number") limit = Math.max(1, Math.min(200, body.limit));
   }
 
-  const parsed = parseVCardFile(text);
-  if (parsed.length === 0) {
+  const parsedAll = parseVCardFile(text);
+  if (parsedAll.length === 0) {
     return Response.json({ error: "Žádné kontakty ve vCard souboru." }, { status: 400 });
   }
+  const total = parsedAll.length;
+  const parsed = parsedAll.slice(offset, offset + limit);
 
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  const errors: string[] = [];
 
   for (const p of parsed) {
+    try {
     // Normalizuj telefony
     const phones = p.phones
       .map((ph) => {
@@ -127,11 +142,22 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       });
       created += 1;
     }
+    } catch (e) {
+      errors.push(`${p.displayName}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
+
+  const nextOffset = offset + parsed.length;
+  const done = nextOffset >= total;
 
   return Response.json({
     ok: true,
-    total: parsed.length,
+    total,
+    processed: nextOffset,
+    nextOffset: done ? null : nextOffset,
+    done,
+    errors: errors.slice(0, 5),
+    chunkTotal: parsed.length,
     created,
     updated,
     skipped,
