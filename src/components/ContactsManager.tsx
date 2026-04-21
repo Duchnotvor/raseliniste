@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Plus, Search, Star, Trash2, Upload, Phone as PhoneIcon, Mail, Save, X } from "lucide-react";
+import { Loader2, Plus, Search, Star, Trash2, Upload, Phone as PhoneIcon, Mail, Save, X, Link as LinkIcon } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 
@@ -58,6 +58,24 @@ export default function ContactsManager() {
     if (!confirm(`Smazat ${c.displayName}?`)) return;
     const res = await fetch(`/api/contacts/${c.id}`, { method: "DELETE" });
     if (res.ok) load();
+  }
+
+  const [copied, setCopied] = useState<string | null>(null);
+  async function copyLink(c: Contact) {
+    const phone = c.phones[0]?.number ?? "";
+    const params = new URLSearchParams();
+    if (phone) params.set("phone", phone);
+    if (c.displayName) params.set("name", c.displayName.split(" ")[0]);
+    const base = typeof window !== "undefined" ? window.location.origin : "https://www.raseliniste.cz";
+    const link = `${base}/call-log?${params.toString()}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(c.id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      // fallback — prompt
+      prompt("Zkopíruj tento odkaz:", link);
+    }
   }
 
   async function importVcf(file: File) {
@@ -169,6 +187,19 @@ export default function ContactsManager() {
                   )}
                 </div>
                 <div className="flex flex-col gap-1">
+                  {c.phones.length > 0 && (
+                    <button
+                      onClick={() => copyLink(c)}
+                      className="p-1.5 rounded hover:bg-white/5 transition-colors"
+                      title="Zkopírovat osobní call-log link"
+                    >
+                      {copied === c.id ? (
+                        <span className="text-[10px] font-mono text-[var(--tint-sage)]">✓</span>
+                      ) : (
+                        <LinkIcon className="size-4 text-muted-foreground" />
+                      )}
+                    </button>
+                  )}
                   <button
                     onClick={() => toggleVip(c)}
                     className="p-1.5 rounded hover:bg-white/5 transition-colors"
