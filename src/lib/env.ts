@@ -4,6 +4,13 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   SESSION_SECRET: z.string().min(32),
   GEMINI_API_KEY: z.string().min(10).optional(),
+  // Vertex AI (doporučeno pro produkci — EU region, žádné trénování na datech).
+  // Pokud VERTEX_PROJECT je nastaveno, má přednost před GEMINI_API_KEY.
+  VERTEX_PROJECT: z.string().min(1).optional(),
+  VERTEX_LOCATION: z.string().min(2).default("europe-west1"),
+  // Cesta k service-account JSON (SDK ji čte z GOOGLE_APPLICATION_CREDENTIALS,
+  // v env schématu ji jen propagujeme pro validaci existence).
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
   APP_URL: z.string().url().default("http://localhost:3000"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   ADMIN_USERNAME: z.string().min(2).optional(),

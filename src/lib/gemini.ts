@@ -1,16 +1,66 @@
 import { GoogleGenAI } from "@google/genai";
 import { env } from "./env";
 
-let client: GoogleGenAI | null = null;
+/**
+ * Gemini klient s dual-mode:
+ *
+ *  (A) Vertex AI — pokud je v .env nastaven VERTEX_PROJECT, použije se
+ *      Google Cloud Vertex AI v regionu VERTEX_LOCATION (default
+ *      europe-west1). Autentizace přes service account JSON — cestu
+ *      k souboru zadáš do GOOGLE_APPLICATION_CREDENTIALS. Data zůstávají
+ *      v EU, nepoužívají se na trénování, Google podepisuje DPA.
+ *
+ *  (B) Google AI Studio API key — fallback pro dev / jednoduchý start.
+ *      Stačí GEMINI_API_KEY z aistudio.google.com. Data mohou jít do
+ *      trénování v free tieru, a klient nemá data residency garance.
+ *
+ * Kód volání (generateContent) je v obou módech shodný — @google/genai
+ * abstrahuje transport.
+ */
 
-export function getGemini() {
-  if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
-  if (!client) client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+let client: GoogleGenAI | null = null;
+let clientMode: "vertex" | "api" | null = null;
+
+export function getGemini(): GoogleGenAI {
+  if (client) return client;
+
+  const vertexProject = env.VERTEX_PROJECT;
+  if (vertexProject) {
+    // Vertex mode — kredenciály si SDK natáhne z GOOGLE_APPLICATION_CREDENTIALS
+    // (path k service-account JSONu) nebo z Application Default Credentials.
+    client = new GoogleGenAI({
+      vertexai: true,
+      project: vertexProject,
+      location: env.VERTEX_LOCATION || "europe-west1",
+    });
+    clientMode = "vertex";
+    return client;
+  }
+
+  if (!env.GEMINI_API_KEY) {
+    throw new Error(
+      "AI klient není nakonfigurovaný. Nastav buď VERTEX_PROJECT (+ GOOGLE_APPLICATION_CREDENTIALS) pro Vertex AI, nebo GEMINI_API_KEY pro Google AI Studio."
+    );
+  }
+
+  client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  clientMode = "api";
   return client;
 }
 
+/** Vrátí info o aktuálně běžícím módu (pro debug / health endpoint). */
+export function getGeminiMode(): "vertex" | "api" | "unconfigured" {
+  if (clientMode) return clientMode;
+  if (env.VERTEX_PROJECT) return "vertex";
+  if (env.GEMINI_API_KEY) return "api";
+  return "unconfigured";
+}
+
+// ---------------------------------------------------------------------------
+// Modely
+// ---------------------------------------------------------------------------
+
 // Default — rychlý, levný, kvalita pro klasifikaci / chat je dostatečná.
-// Tohle volá: capture classifier, AI chat (když není fast=false), jakákoli běžná operace.
 export const DEFAULT_MODEL = "gemini-2.5-flash";
 
 // Alias zachovaný pro zpětnou kompatibilitu s existujícím kódem.
