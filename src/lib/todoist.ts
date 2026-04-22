@@ -1,14 +1,15 @@
 /**
- * Todoist REST API v2 klient.
- * Dokumentace: https://developer.todoist.com/rest/v2/
+ * Todoist Unified API v1 klient.
+ * Dokumentace: https://developer.todoist.com/api/v1/
+ *
+ * (REST v2 endpoint byl v dubnu 2026 deprecated → 410 Gone.)
  *
  * Používáme:
- *  - GET /projects — list pro picker v settings
+ *  - GET /projects — list pro picker v settings (paginovaný: { results, next_cursor })
  *  - POST /tasks — vytvoření úkolu z call-log
- *  - GET /projects/{id} — test připojení (+ sanity check)
  */
 
-const BASE = "https://api.todoist.com/rest/v2";
+const BASE = "https://api.todoist.com/api/v1";
 
 export interface TodoistProject {
   id: string;
@@ -54,7 +55,24 @@ async function call<T>(token: string, path: string, init?: RequestInit): Promise
 }
 
 export async function listProjects(token: string): Promise<TodoistProject[]> {
-  return call<TodoistProject[]>(token, "/projects");
+  // v1 vrací { results: [...], next_cursor: string|null }
+  // Procházíme stránky dokud je cursor. Max 500 projektů stačí pro běžný účet.
+  const all: TodoistProject[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < 10; i++) {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const page = await call<{ results: TodoistProject[]; next_cursor: string | null }>(
+      token,
+      `/projects${query}`
+    );
+    // Defensive: pokud by API vrátilo přímo array (pro jistotu)
+    if (Array.isArray(page)) return page as unknown as TodoistProject[];
+    if (!page?.results) break;
+    all.push(...page.results);
+    if (!page.next_cursor) break;
+    cursor = page.next_cursor;
+  }
+  return all;
 }
 
 export async function createTask(token: string, input: CreateTaskInput): Promise<TodoistTask> {
