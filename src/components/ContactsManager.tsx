@@ -65,7 +65,11 @@ export default function ContactsManager() {
     const phone = c.phones[0]?.number ?? "";
     const params = new URLSearchParams();
     if (phone) params.set("phone", phone);
-    if (c.displayName) params.set("name", c.displayName.split(" ")[0]);
+    // Jméno v URL je jen hint — server si ho stejně ověří proti DB (VIP flag)
+    // a pokud kontakt není VIP, oslovení nezobrazí. Pošleme ho proto vždy,
+    // ať link funguje i kdyby se status později změnil.
+    const firstName = c.firstName?.trim() || c.displayName.split(" ")[0];
+    if (firstName) params.set("name", firstName);
     const base = typeof window !== "undefined" ? window.location.origin : "https://www.raseliniste.cz";
     const link = `${base}/call-log?${params.toString()}`;
     try {
