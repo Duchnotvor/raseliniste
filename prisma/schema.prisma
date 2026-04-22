@@ -109,11 +109,19 @@ model Entry {
 
   status           EntryStatus @default(PENDING)
 
+  // Push TASK položek do Todoistu (z /tasks stránky). Non-null = už je v TD.
+  todoistTaskId    String?
+  todoistProjectId String?
+
+  // Ručně označeno jako hotové v /tasks nebo /notes (nezávisle na Todoistu).
+  completedAt      DateTime?
+
   createdAt        DateTime    @default(now())
   confirmedAt      DateTime?
 
   @@index([recordingId])
   @@index([status])
+  @@index([type, status, completedAt])
 }
 
 // ---- Zdravotní data (Apple Health přes Health Auto Export) ----

@@ -8,6 +8,7 @@ export const prerender = false;
 const Body = z.object({
   vyruseni: z.string().nullable().optional(),
   vip: z.string().nullable().optional(),
+  mojeUkoly: z.string().nullable().optional(),
 });
 
 export const PATCH: APIRoute = async ({ request, cookies }) => {
@@ -31,6 +32,7 @@ export const PATCH: APIRoute = async ({ request, cookies }) => {
   const config = {
     vyruseni: body.vyruseni ?? undefined,
     vip: body.vip ?? undefined,
+    mojeUkoly: body.mojeUkoly ?? undefined,
   };
 
   await prisma.userIntegration.update({

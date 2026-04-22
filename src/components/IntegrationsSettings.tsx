@@ -7,6 +7,7 @@ interface InitialProps {
   hasToken: boolean;
   vyruseniProjectId: string | null;
   vipProjectId: string | null;
+  mojeUkolyProjectId: string | null;
   lastUsedAt: string | null;
   lastError: string | null;
 }
@@ -27,6 +28,7 @@ export default function IntegrationsSettings({ initial }: { initial: InitialProp
   const [projects, setProjects] = useState<Project[]>([]);
   const [vyruseni, setVyruseni] = useState(initial.vyruseniProjectId ?? "");
   const [vip, setVip] = useState(initial.vipProjectId ?? "");
+  const [mojeUkoly, setMojeUkoly] = useState(initial.mojeUkolyProjectId ?? "");
   const [loadingProjects, setLoadingProjects] = useState(false);
   const lastUsed = initial.lastUsedAt ? new Date(initial.lastUsedAt) : null;
   const lastErr = initial.lastError;
@@ -82,6 +84,7 @@ export default function IntegrationsSettings({ initial }: { initial: InitialProp
         body: JSON.stringify({
           vyruseni: vyruseni || null,
           vip: vip || null,
+          mojeUkoly: mojeUkoly || null,
         }),
       });
       const data = await res.json();
@@ -249,6 +252,25 @@ export default function IntegrationsSettings({ initial }: { initial: InitialProp
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-white/5">
+                <label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-mono">
+                  Moje úkoly (Capture → Todoist)
+                </label>
+                <select
+                  value={mojeUkoly}
+                  onChange={(e) => setMojeUkoly(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-background/40 border border-border/60 focus:border-primary focus:outline-none text-sm"
+                >
+                  <option value="">— Inbox (default) —</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  Kam chodí tvoje vlastní úkoly z diktátu přes tlačítko „Do Todoistu" na stránce /tasks.
+                </p>
               </div>
 
               <Button onClick={saveConfig} disabled={saving}>

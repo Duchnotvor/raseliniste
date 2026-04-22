@@ -1,0 +1,24 @@
+---
+import Shell from "../layouts/Shell.astro";
+import NotesList from "../components/NotesList";
+import { prisma } from "../lib/db";
+import { readSession } from "../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+---
+
+<Shell
+  title="Poznámky · Rašeliniště"
+  username={user.username}
+  heading="Poznámky"
+  breadcrumb={[{ label: "Organizace" }, { label: "Poznámky" }]}
+>
+  <NotesList client:load />
+</Shell>

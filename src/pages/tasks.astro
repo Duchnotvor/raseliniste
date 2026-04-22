@@ -1,0 +1,32 @@
+---
+import Shell from "../layouts/Shell.astro";
+import TasksList from "../components/TasksList";
+import { prisma } from "../lib/db";
+import { readSession } from "../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+// Zjisti jestli je nakonfigurovaná Todoist integrace (pro zobrazení push tlačítka).
+const todoistConfigured = Boolean(
+  await prisma.userIntegration.findUnique({
+    where: { userId_provider: { userId: session.uid, provider: "todoist" } },
+    select: { id: true },
+  })
+);
+---
+
+<Shell
+  title="Úkoly · Rašeliniště"
+  username={user.username}
+  heading="Úkoly"
+  breadcrumb={[{ label: "Organizace" }, { label: "Úkoly" }]}
+>
+  <TasksList client:load todoistConfigured={todoistConfigured} />
+</Shell>
