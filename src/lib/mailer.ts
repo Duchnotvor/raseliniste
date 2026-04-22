@@ -1,11 +1,16 @@
 import { env } from "./env";
+import { prisma } from "./db";
+import { decryptSecret } from "./crypto";
 
 /**
- * Thin wrapper nad Resend HTTP API (https://resend.com/docs/api-reference/emails/send-email).
- * - V dev / bez klíče pouze loguje; nebrání flow.
- * - Produkce: vyžaduje RESEND_API_KEY + NOTIFICATION_FROM + NOTIFICATION_EMAIL.
+ * Mailer s několika dopravními cestami, v pořadí priority:
+ *  1. SMTP — když má uživatel v DB uložené SMTP integrace (provider="smtp").
+ *     Používáme nodemailer. Heslo je šifrované AES-256-GCM.
+ *  2. Resend HTTP API — fallback pro případy, kdy je RESEND_API_KEY v .env.
+ *  3. Log — poslední záchrana (dev). Nic se nepošle, jen console.log.
  *
- * Resend free tier: 3 000 mailů / měsíc, 100 / den — více než dost pro single-user.
+ * Resend free tier: 3 000 mailů / měsíc, 100 / den.
+ * SMTP (Seznam/Gmail) má obvykle 100-500 mailů / den, bohatě stačí.
  */
 
 export type MailInput = {
@@ -16,25 +21,103 @@ export type MailInput = {
 };
 
 export type MailResult =
-  | { ok: true; provider: "resend" | "log"; id?: string }
+  | { ok: true; provider: "smtp" | "resend" | "log"; id?: string }
   | { ok: false; error: string };
 
-export async function sendMail(input: MailInput): Promise<MailResult> {
-  const apiKey = env.RESEND_API_KEY;
-  const from = env.NOTIFICATION_FROM;
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean; // true pro 465, false pro 587 (STARTTLS)
+  user: string;
+  from: string;
+}
 
-  if (!apiKey || !from) {
-    console.log(
-      `[mailer] RESEND_API_KEY nebo NOTIFICATION_FROM není nastaveno. Mail by šel na ${input.to}:\n  subject: ${input.subject}\n  (html ${input.html.length} chars)`
-    );
-    return { ok: true, provider: "log" };
+// Cache pro transporter (nodemailer), aby se nevytvářel pool na každý mail.
+let cachedTransporter: unknown = null;
+let cachedTransporterKey: string | null = null;
+
+async function getSmtpConfig(): Promise<{ config: SmtpConfig; password: string } | null> {
+  // Single-user systém → najdi prvního userova SMTP config.
+  const user = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+  if (!user) return null;
+
+  const integration = await prisma.userIntegration.findUnique({
+    where: { userId_provider: { userId: user.id, provider: "smtp" } },
+  });
+  if (!integration) return null;
+
+  const cfg = integration.config as unknown as SmtpConfig | null;
+  if (!cfg || !cfg.host || !cfg.user || !cfg.from) return null;
+
+  const password = decryptSecret({
+    enc: integration.tokenEnc,
+    iv: integration.tokenIv,
+    tag: integration.tokenTag,
+  });
+
+  return { config: cfg, password };
+}
+
+async function sendViaSmtp(input: MailInput, cfg: SmtpConfig, password: string): Promise<MailResult> {
+  try {
+    const nodemailer = await import("nodemailer");
+    const key = `${cfg.host}:${cfg.port}:${cfg.user}`;
+    if (!cachedTransporter || cachedTransporterKey !== key) {
+      cachedTransporter = nodemailer.default.createTransport({
+        host: cfg.host,
+        port: cfg.port,
+        secure: cfg.secure,
+        auth: { user: cfg.user, pass: password },
+        // Seznam/většina providerů podporuje TLS 1.2+
+      });
+      cachedTransporterKey = key;
+    }
+    const transporter = cachedTransporter as {
+      sendMail: (opts: Record<string, unknown>) => Promise<{ messageId: string }>;
+    };
+    const info = await transporter.sendMail({
+      from: cfg.from,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+    });
+
+    // Update lastUsedAt
+    const user = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+    if (user) {
+      await prisma.userIntegration.updateMany({
+        where: { userId: user.id, provider: "smtp" },
+        data: { lastUsedAt: new Date(), lastError: null },
+      });
+    }
+
+    return { ok: true, provider: "smtp", id: info.messageId };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "SMTP error";
+    // Log error to DB for UI feedback
+    const user = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } }).catch(() => null);
+    if (user) {
+      await prisma.userIntegration
+        .updateMany({
+          where: { userId: user.id, provider: "smtp" },
+          data: { lastError: msg },
+        })
+        .catch(() => null);
+    }
+    // Invalidate transporter cache (třeba se připojení zaseklo)
+    cachedTransporter = null;
+    cachedTransporterKey = null;
+    return { ok: false, error: `SMTP: ${msg}` };
   }
+}
 
+async function sendViaResend(input: MailInput, apiKey: string, from: string): Promise<MailResult> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        "authorization": `Bearer ${apiKey}`,
+        authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -45,7 +128,6 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
         text: input.text,
       }),
     });
-
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 300)}` };
@@ -53,7 +135,52 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
     const data = await res.json().catch(() => ({}));
     return { ok: true, provider: "resend", id: data.id as string | undefined };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Unknown mailer error" };
+    return { ok: false, error: err instanceof Error ? err.message : "Resend error" };
+  }
+}
+
+export async function sendMail(input: MailInput): Promise<MailResult> {
+  // 1) SMTP z DB
+  try {
+    const smtp = await getSmtpConfig();
+    if (smtp) {
+      return await sendViaSmtp(input, smtp.config, smtp.password);
+    }
+  } catch (err) {
+    console.error("[mailer] SMTP config lookup failed:", err);
+  }
+
+  // 2) Resend z .env
+  const apiKey = env.RESEND_API_KEY;
+  const from = env.NOTIFICATION_FROM;
+  if (apiKey && from) {
+    return await sendViaResend(input, apiKey, from);
+  }
+
+  // 3) Log-only fallback
+  console.log(
+    `[mailer] Žádný transport nenakonfigurován. Mail by šel na ${input.to}:\n  subject: ${input.subject}\n  (html ${input.html.length} chars)`
+  );
+  return { ok: true, provider: "log" };
+}
+
+/**
+ * Ad-hoc test SMTP připojení bez skutečného odeslání.
+ * Používá transporter.verify() → true pokud login OK, jinak throw.
+ */
+export async function testSmtpConnection(cfg: SmtpConfig, password: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const nodemailer = await import("nodemailer");
+    const transporter = nodemailer.default.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: { user: cfg.user, pass: password },
+    });
+    await transporter.verify();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "SMTP verify failed" };
   }
 }
 

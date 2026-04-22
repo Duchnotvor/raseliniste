@@ -15,7 +15,7 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss()],
     ssr: {
-      external: ["argon2", "@prisma/adapter-pg", "pg"],
+      external: ["argon2", "@prisma/adapter-pg", "pg", "nodemailer"],
     },
   },
   // `checkOrigin: true` blokuje POST requesty při deploy za Reverse Proxy,

@@ -1,25 +1,32 @@
 ---
 import Shell from "../../layouts/Shell.astro";
-import ReportsSettings from "../../components/ReportsSettings";
+import MailSettings from "../../components/MailSettings";
 import { prisma } from "../../lib/db";
 import { readSession } from "../../lib/session";
+import { env } from "../../lib/env";
 
 const session = await readSession(Astro.cookies);
 if (!session) return Astro.redirect("/login");
 
 const user = await prisma.user.findUnique({
   where: { id: session.uid },
-  select: { username: true },
+  select: { username: true, notificationEmail: true },
 });
 if (!user) return Astro.redirect("/login");
+
+const envNotificationEmail = env.NOTIFICATION_EMAIL ?? null;
 ---
 
 <Shell
-  title="E-mailové reporty · Rašeliniště"
+  title="E-mail · Rašeliniště"
   username={user.username}
-  breadcrumb={[{ label: "Nastavení" }, { label: "E-mailové reporty" }]}
+  breadcrumb={[{ label: "Nastavení" }, { label: "E-mail" }]}
 >
   <div class="max-w-2xl">
-    <ReportsSettings client:load />
+    <MailSettings
+      client:load
+      initialReportEmail={user.notificationEmail ?? null}
+      envNotificationEmail={envNotificationEmail}
+    />
   </div>
 </Shell>
