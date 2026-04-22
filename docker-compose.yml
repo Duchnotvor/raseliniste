@@ -25,6 +25,10 @@ services:
       DATABASE_URL: postgresql://raseliniste:${DB_PASSWORD}@postgres:5432/raseliniste
       SESSION_SECRET: ${SESSION_SECRET:?required}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Vertex AI (pokud VERTEX_PROJECT je vyplněný, má přednost před GEMINI_API_KEY)
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-europe-west1}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/gcp-key.json}
       APP_URL: ${APP_URL:-https://www.raseliniste.cz}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       NOTIFICATION_FROM: ${NOTIFICATION_FROM:-}
@@ -36,6 +40,10 @@ services:
     volumes:
       - ./uploads:/data/uploads
       - app_cache:/data/cache
+      # Vertex AI service-account JSON. Pokud soubor neexistuje, Docker
+      # při startu failne — záměrně. Buď tam ten klíč dej, nebo tenhle
+      # řádek zakomentuj (pak pojede GEMINI_API_KEY fallback).
+      - ./gcp-key.json:/app/gcp-key.json:ro
     ports:
       - "3333:3000"
     depends_on:
