@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { readSession } from "@/lib/session";
+import { pushEntryToTodoist } from "@/lib/todoist-push";
 
 export const prerender = false;
 
@@ -80,10 +81,42 @@ export const PATCH: APIRoute = async ({ params, request, cookies }) => {
       knowledgeCategory: true,
       knowledgeUrl: true,
       knowledgeTags: true,
+      hashtags: true,
       status: true,
       confirmedAt: true,
+      todoistTaskId: true,
     },
   });
 
-  return Response.json({ entry: updated });
+  // ==== Auto-push TASK do Todoistu při confirm ====
+  // Když právě potvrzuješ úkol a máš uložený Todoist token, pošleme tam task
+  // rovnou — ušetří krok na /tasks. Když to selže, entry zůstane CONFIRMED
+  // a user ho může pushnout manuálně z /tasks později.
+  let todoistPush: { ok: boolean; taskId?: string; error?: string } | undefined;
+  if (patch.status === "CONFIRMED" && updated.type === "TASK" && !updated.todoistTaskId) {
+    try {
+      const res = await pushEntryToTodoist({
+        userId: session.uid,
+        text: updated.text,
+        type: "TASK",
+        when: updated.suggestedWhen as "TODAY" | "THIS_WEEK" | "SOMEDAY" | null,
+        suggestedProject: updated.suggestedProject,
+        rationale: updated.rationale,
+        hashtags: updated.hashtags ?? [],
+      });
+      await prisma.entry.update({
+        where: { id },
+        data: { todoistTaskId: res.taskId, todoistProjectId: res.projectId },
+      });
+      todoistPush = { ok: true, taskId: res.taskId };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Když Todoist není nakonfigurovaný, neberem to jako chybu — jen info.
+      if (!msg.includes("není nakonfigurovaná")) {
+        todoistPush = { ok: false, error: msg };
+      }
+    }
+  }
+
+  return Response.json({ entry: updated, todoist: todoistPush });
 };

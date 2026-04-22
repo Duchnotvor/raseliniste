@@ -74,6 +74,12 @@ export default function TriageList() {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showRationale, setShowRationale] = useState<Set<string>>(new Set());
+  const [toast, _setToast] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  function setToast(t: { type: "ok" | "err"; text: string } | null) {
+    _setToast(t);
+    if (t) setTimeout(() => _setToast(null), 3200);
+  }
 
   async function refresh() {
     setLoading(true);
@@ -103,7 +109,10 @@ export default function TriageList() {
     });
   }
 
-  async function patchEntry(id: string, patch: Record<string, unknown>): Promise<Entry | null> {
+  async function patchEntry(
+    id: string,
+    patch: Record<string, unknown>
+  ): Promise<{ entry: Entry; todoist?: { ok: boolean; error?: string } } | null> {
     setPending(id, true);
     try {
       const res = await fetch(`/api/entries/${id}`, {
@@ -116,29 +125,41 @@ export default function TriageList() {
         setError(data.error ?? "Úprava selhala.");
         return null;
       }
-      return data.entry as Entry;
+      return { entry: data.entry as Entry, todoist: data.todoist };
     } finally {
       setPending(id, false);
     }
   }
 
   async function confirmEntry(id: string) {
-    const updated = await patchEntry(id, { status: "CONFIRMED" });
-    if (updated) setEntries((prev) => prev.filter((e) => e.id !== id));
+    const result = await patchEntry(id, { status: "CONFIRMED" });
+    if (result) {
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+      if (result.todoist?.ok) {
+        setToast({ type: "ok", text: "Úkol odeslán do Todoistu ✓" });
+      } else if (result.todoist && !result.todoist.ok) {
+        setToast({ type: "err", text: `Todoist: ${result.todoist.error}` });
+      }
+    }
   }
   async function discardEntry(id: string) {
-    const updated = await patchEntry(id, { status: "DISCARDED" });
-    if (updated) setEntries((prev) => prev.filter((e) => e.id !== id));
+    const result = await patchEntry(id, { status: "DISCARDED" });
+    if (result) setEntries((prev) => prev.filter((e) => e.id !== id));
   }
 
   async function updateFields(id: string, patch: Record<string, unknown>) {
-    const updated = await patchEntry(id, patch);
-    if (updated) {
+    const result = await patchEntry(id, patch);
+    if (result) {
       setEntries((prev) =>
         prev.map((e) =>
-          e.id === id ? { ...e, ...updated, recording: e.recording } : e
+          e.id === id ? { ...e, ...result.entry, recording: e.recording } : e
         )
       );
+      if (result.todoist?.ok) {
+        setToast({ type: "ok", text: "Úkol odeslán do Todoistu ✓" });
+      } else if (result.todoist && !result.todoist.ok) {
+        setToast({ type: "err", text: `Todoist: ${result.todoist.error}` });
+      }
     }
   }
 
@@ -174,6 +195,17 @@ export default function TriageList() {
 
   return (
     <div className="space-y-3">
+      {toast && (
+        <div
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-md text-sm font-medium shadow-lg ${
+            toast.type === "ok"
+              ? "bg-[var(--tint-sage)]/90 text-black"
+              : "bg-destructive/90 text-destructive-foreground"
+          }`}
+        >
+          {toast.text}
+        </div>
+      )}
       {entries.map((e) => (
         <EntryCard
           key={e.id}
