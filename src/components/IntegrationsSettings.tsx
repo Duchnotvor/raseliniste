@@ -31,8 +31,9 @@ export default function IntegrationsSettings({ initial }: { initial: InitialProp
   const lastUsed = initial.lastUsedAt ? new Date(initial.lastUsedAt) : null;
   const lastErr = initial.lastError;
 
-  async function loadProjects() {
-    if (!hasToken) return;
+  async function loadProjects(force = false) {
+    // force = po saveToken, kdy je hasToken state ještě ve staré hodnotě
+    if (!force && !hasToken) return;
     setLoadingProjects(true);
     try {
       const res = await fetch("/api/integrations/todoist/projects");
@@ -63,7 +64,7 @@ export default function IntegrationsSettings({ initial }: { initial: InitialProp
       setToken("");
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-      loadProjects();
+      loadProjects(true);
     } catch {
       setError("Síťová chyba.");
     } finally {
