@@ -28,12 +28,14 @@ export function getGemini(): GoogleGenAI {
   if (vertexProject) {
     // Vertex mode — kredenciály si SDK natáhne z GOOGLE_APPLICATION_CREDENTIALS
     // (path k service-account JSONu) nebo z Application Default Credentials.
+    const location = env.VERTEX_LOCATION || "europe-west1";
     client = new GoogleGenAI({
       vertexai: true,
       project: vertexProject,
-      location: env.VERTEX_LOCATION || "europe-west1",
+      location,
     });
     clientMode = "vertex";
+    console.log(`[gemini] Vertex AI mode — project=${vertexProject} location=${location}`);
     return client;
   }
 
@@ -45,6 +47,7 @@ export function getGemini(): GoogleGenAI {
 
   client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
   clientMode = "api";
+  console.log(`[gemini] AI Studio API key mode (fallback — doporučeno přejít na Vertex)`);
   return client;
 }
 
