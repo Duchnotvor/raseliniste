@@ -52,3 +52,6 @@ next-env.d.ts
 # osobní data (vCard exporty, fotky, atd.)
 /contacts/
 *.vcf
+
+# nahrané soubory (loga, podpisy, vygenerovaná PDF)
+/uploads/

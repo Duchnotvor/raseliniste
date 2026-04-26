@@ -1,0 +1,27 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import LetterSendersManager from "../../components/LetterSendersManager";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const firstRun = Astro.url.searchParams.get("firstRun") === "1";
+---
+
+<Shell
+  title="Odesílatelé · Rašeliniště"
+  username={user.username}
+  breadcrumb={[{ label: "Nastavení" }, { label: "Odesílatelé dopisů" }]}
+>
+  <div class="max-w-3xl">
+    <LetterSendersManager client:load firstRun={firstRun} />
+  </div>
+</Shell>

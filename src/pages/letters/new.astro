@@ -1,0 +1,50 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import LetterEditor from "../../components/LetterEditor";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const senders = await prisma.letterSender.findMany({
+  where: { userId: session.uid },
+  orderBy: { name: "asc" },
+});
+const recipients = await prisma.letterRecipient.findMany({
+  where: { userId: session.uid },
+  orderBy: { name: "asc" },
+});
+
+if (senders.length === 0) {
+  return Astro.redirect("/settings/letter-senders?firstRun=1");
+}
+---
+
+<Shell
+  title="Nový dopis · Rašeliniště"
+  username={user.username}
+  heading="Nový dopis"
+  breadcrumb={[{ label: "Dopisy", href: "/letters" }, { label: "Nový" }]}
+>
+  <LetterEditor
+    client:load
+    mode="new"
+    senders={senders.map((s) => ({
+      id: s.id,
+      name: s.name,
+      redactPrompt: s.redactPrompt,
+    }))}
+    recipients={recipients.map((r) => ({
+      id: r.id,
+      name: r.name,
+      addressLines: r.addressLines,
+    }))}
+  />
+</Shell>

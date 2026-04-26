@@ -29,6 +29,9 @@ model User {
   contacts      Contact[]
   callLogs      CallLog[]
   integrations  UserIntegration[]
+  letterSenders LetterSender[]
+  letterRecipients LetterRecipient[]
+  letters       Letter[]
 }
 
 model WebauthnCredential {
@@ -369,4 +372,107 @@ model LoginAttempt {
 
   @@index([username, createdAt])
   @@index([ip, createdAt])
+}
+
+// ---- Dopisy: odesílatelé, adresáti, dopisy s PDF ----
+
+model LetterSender {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+
+  name          String   // "Petr Perina (osobní)", "ART76", "ABC s.r.o."
+  legalName     String?  // formální název pro hlavičku, pokud se liší
+  ico           String?
+  dic           String?
+
+  // Adresa odesílatele (volitelné, multiline)
+  addressLines  String[] @default([])
+
+  email         String?
+  phone         String?
+  web           String?
+  bankAccount   String?
+
+  // Cesty k souborům (relativní k UPLOADS_DIR)
+  logoPath      String?
+  signaturePath String?
+
+  // AI prompt pro tlačítko "Učesat" — per odesílatel.
+  // Per dopis se k tomuto promptu může připojit krátký override
+  // (např. "vypíchni tučně klíčové body").
+  redactPrompt  String  @default("Učeš text dopisu do formálního, zdvořilého a srozumitelného tónu. Zachovej oslovení i závěr napsané uživatelem. Neměň fakta. Vrať jen výsledný text bez vysvětlivek a bez markdown formátování.")
+
+  // PDF design preset (zatím jen "classic"; do budoucna 'minimal', 'bold', ...)
+  pdfTheme      String  @default("classic")
+
+  letters       Letter[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model LetterRecipient {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+
+  name         String   // "Pan Karel Novák" / "ČSOB, a.s."
+  addressLines String[] @default([])
+
+  letters      Letter[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Letter {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+
+  senderId      String
+  sender        LetterSender @relation(fields: [senderId], references: [id])
+
+  recipientId   String?
+  recipient     LetterRecipient? @relation(fields: [recipientId], references: [id])
+
+  // Snapshot adresáta v momentě generování — i kdyby uživatel kontakt
+  // později smazal nebo upravil, dopis si pamatuje, jak vypadal.
+  recipientNameSnapshot         String?
+  recipientAddressLinesSnapshot String[] @default([])
+  showRecipientAddress          Boolean  @default(true)
+
+  // Datum dopisu (default = dnes, lze přepsat)
+  letterDate    DateTime @default(now())
+  // Místo (např. "V Praze") — volitelné, zobrazí se jen pokud vyplněno
+  place         String?
+
+  // Vstupní text (co uživatel napsal) + finální text (po případném "učesání")
+  // Pokud nepoužije Učesat, bodyFinal == bodyRaw.
+  bodyRaw       String
+  bodyFinal     String
+
+  // Per-dopis prompt addendum (přidá se k senderRedactPrompt)
+  promptOverride String?
+
+  // Verzování — pokud je toto regenerace, parent ukáže původní dopis.
+  parentLetterId String?
+  parent         Letter?  @relation("LetterVersions", fields: [parentLetterId], references: [id])
+  versions       Letter[] @relation("LetterVersions")
+  version        Int      @default(1)
+
+  // Cache PDF na disku (relativně k UPLOADS_DIR)
+  pdfPath        String?
+  pdfGeneratedAt DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([senderId])
 }

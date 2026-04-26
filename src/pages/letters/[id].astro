@@ -1,0 +1,74 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import LetterEditor from "../../components/LetterEditor";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const id = Astro.params.id;
+if (!id) return Astro.redirect("/letters");
+
+const letter = await prisma.letter.findFirst({
+  where: { id, userId: session.uid },
+  include: { sender: true, recipient: true },
+});
+if (!letter) return Astro.redirect("/letters");
+
+const senders = await prisma.letterSender.findMany({
+  where: { userId: session.uid },
+  orderBy: { name: "asc" },
+});
+const recipients = await prisma.letterRecipient.findMany({
+  where: { userId: session.uid },
+  orderBy: { name: "asc" },
+});
+---
+
+<Shell
+  title={`Dopis · ${letter.sender.name}`}
+  username={user.username}
+  heading="Dopis"
+  breadcrumb={[
+    { label: "Dopisy", href: "/letters" },
+    { label: `${letter.sender.name} · v${letter.version}` },
+  ]}
+>
+  <LetterEditor
+    client:load
+    mode="edit"
+    initialLetter={{
+      id: letter.id,
+      senderId: letter.senderId,
+      recipientId: letter.recipientId,
+      recipientNameSnapshot: letter.recipientNameSnapshot,
+      recipientAddressLinesSnapshot: letter.recipientAddressLinesSnapshot,
+      showRecipientAddress: letter.showRecipientAddress,
+      letterDate: letter.letterDate.toISOString(),
+      place: letter.place,
+      bodyRaw: letter.bodyRaw,
+      bodyFinal: letter.bodyFinal,
+      promptOverride: letter.promptOverride,
+      version: letter.version,
+      parentLetterId: letter.parentLetterId,
+      pdfPath: letter.pdfPath,
+    }}
+    senders={senders.map((s) => ({
+      id: s.id,
+      name: s.name,
+      redactPrompt: s.redactPrompt,
+    }))}
+    recipients={recipients.map((r) => ({
+      id: r.id,
+      name: r.name,
+      addressLines: r.addressLines,
+    }))}
+  />
+</Shell>

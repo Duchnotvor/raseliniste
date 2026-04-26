@@ -1,0 +1,30 @@
+---
+import Shell from "../layouts/Shell.astro";
+import LettersArchive from "../components/LettersArchive";
+import { prisma } from "../lib/db";
+import { readSession } from "../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const senders = await prisma.letterSender.findMany({
+  where: { userId: session.uid },
+  select: { id: true, name: true },
+  orderBy: { name: "asc" },
+});
+---
+
+<Shell
+  title="Dopisy · Rašeliniště"
+  username={user.username}
+  heading="Dopisy"
+  breadcrumb={[{ label: "Dopisy" }]}
+>
+  <LettersArchive client:load senders={senders} />
+</Shell>
