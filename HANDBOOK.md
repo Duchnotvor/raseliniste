@@ -2,7 +2,7 @@
 
 Osobní informační systém Petra „Gideona" Perniy. Jeden uživatel, maximum bezpečnosti, postupné rozšiřování.
 
-> **TL;DR:** Astro 6 + React 19 islands + Prisma 7 + PostgreSQL 16, běží na Synology DS718+ v Dockeru, deploy přes ghcr.io. Design **Liquid Glass** na dark navy pozadí. Login je **heslo + passkey (Touch ID)**. Tři živé moduly: **Capture** (diktát → Gemini klasifikace → triage), **Deník** (přímý deníkový zápis + AI redakce + hashtagy + lokace), **Zdraví** (Apple Health přes Health Auto Export + dashboard + AI analýzy + měsíční cron mail).
+> **TL;DR:** Astro 6 + React 19 islands + Prisma 7 + PostgreSQL 16, běží na Synology DS718+ v Dockeru, deploy přes ghcr.io. Design **Liquid Glass** na dark navy pozadí. Login je **heslo + passkey (Touch ID)**. Devět živých modulů: **Capture** (diktát → Gemini → triage → auto-push do Todoistu), **Úkoly** (`/tasks`, grupované podle when), **Poznámky** (`/notes`, KNOWLEDGE+THOUGHT), **Deník** (`/journal`, AI redakce, lokace), **Zdraví** (HAE + dashboard + AI analýzy), **Kontakty** (vCard import, VIP), **Gideonův Firewall** (`/call-log`, public form → Todoist + mail), **Dopisy** (`/letters`, 2 PDF šablony, učesat AI), **E-mail** (SMTP přes UI: Seznam/Gmail/…). AI běží na **Vertex AI** (EU region) nebo Gemini API key.
 
 ---
 
@@ -239,6 +239,25 @@ raseliniste/
   - `text` (markdown odpověď), `model`, stats
   - `emailSentAt`, `emailError`
 
+### Firewall (Gideonův) — kontakty + příchozí vzkazy
+- **Contact** — `displayName`, `firstName`, `lastName`, `note`, **`isVip`**, `importedFrom` (`vcard`/`manual`), `externalId` (UID z vCard).
+- **Phone** — E.164 normalizovaný, `label` (mobile/work/home/…). `@@unique([contactId, number])` + `@@index([number])` pro O(1) lookup příchozího vzkazu.
+- **ContactEmail** — `email`, `label`.
+- **CallLog** — `phoneNumber` (E.164), `rawNumber`, `contactId?`, `message`, `isUrgent`, **`wasVip`** (snapshot), `ip`, `userAgent`, `todoistTaskId?`, `todoistError?`, `mailSentAt?`, `mailError?`, `seenAt?`.
+
+### Integrace (provider-agnostic credentials)
+- **UserIntegration** — `provider` (`todoist` | `smtp` | budoucí), AES-256-GCM šifrované creds (`tokenEnc`/`tokenIv`/`tokenTag`), `config Json?`, `lastUsedAt`, `lastError`. Klíč šifrování derivovaný ze `SESSION_SECRET`.
+  - **Todoist `config`**: `{ vyruseni, vip, mojeUkoly }` — IDs Todoist projektů.
+  - **SMTP `config`**: `{ host, port, secure, user, from }` — heslo v `tokenEnc`.
+
+### Tasks/Notes (extension Entry)
+- **Entry** doplněn o `todoistTaskId`, `todoistProjectId` (push do Todoistu) a `completedAt` (mark done v /tasks /notes).
+
+### Dopisy
+- **LetterSender** — `name` (interní), `legalName`, `ico`, `dic`, `addressLines[]`, kontakt (e-mail/telefon/web/banka), `logoPath`, `signaturePath`, **`redactPrompt`** (per-odesílatel AI prompt pro „Učesat"), **`pdfTheme`** (`classic` | `personal`).
+- **LetterRecipient** — `name`, `addressLines[]`. Knihovna sdílená napříč dopisy; lze i ad-hoc per dopis.
+- **Letter** — `senderId`, `recipientId?`, **snapshot adresáta** (`recipientNameSnapshot`, `recipientAddressLinesSnapshot`, `showRecipientAddress`), `letterDate`, `place?`, **`bodyRaw` + `bodyFinal`** (před/po Učesat), `promptOverride?`, **verzování** (`parentLetterId`, `version`), `pdfPath?` (cache).
+
 ### Enums
 - `RecordingSource`, `EntryType`, `TaskWhen`, `EntryStatus`, `AnalysisTrigger`
 
@@ -283,21 +302,92 @@ Samostatný modul s vlastním direct endpointem.
 - **Historie analýz** — seznam pod dashboardem, detail modal, smazat
 - **Měsíční automat** — `POST /api/cron/monthly-health-report` s `x-cron-key` auth, Synology Task Scheduler, poslední den v měsíci, email přes Resend
 
+### ✅ Úkoly (hotovo)
+- `/tasks` — CONFIRMED TASK entries grupované podle `suggestedWhen` (Dnes / Tento týden / Někdy / Bez termínu)
+- Mark done (`completedAt`), delete, filter „zobrazit hotové"
+- **Push do Todoistu** — tlačítko per úkol nebo automaticky z Triage (`pushEntryToTodoist` v `lib/todoist-push.ts`)
+- Idempotentní (`Entry.todoistTaskId` cache)
+- Mapping: `TaskWhen.TODAY → due_string="today"`, `THIS_WEEK → "this week"`, `SOMEDAY → no due`
+- Labels: `capture` + `suggestedProject` + hashtags
+
+### ✅ Poznámky (hotovo)
+- `/notes` — CONFIRMED entries typu `KNOWLEDGE` + `THOUGHT`
+- Search (text/rationale/url), filter by type/category/tag, archiv (`completedAt`)
+- Karta zobrazí `knowledgeUrl` jako klik. odkaz, badge `knowledgeCategory`, hashtagy
+
+### ✅ Kontakty (hotovo)
+- `/contacts` — CRUD + VIP toggle + import vCard
+- vCard parser v `lib/vcard.ts` (vCard 2.1/3.0/4.0, quoted-printable, continuation lines)
+- Phone normalizace přes `libphonenumber-js` → E.164
+- **Chunked import** — UI posílá dávky po 50 přes `?offset=&limit=`, řeší 60s nginx timeout u 1000+ kontaktů
+- Dedup: `externalId` (vCard UID) → `phones[].number`
+- Tlačítko 🔗 — zkopíruje personalizovaný `/call-log?phone=…&name=…` link pro VIP kontakt
+
+### ✅ Gideonův Firewall (hotovo)
+Veřejný endpoint pro lidi, kteří chtějí vyrušit, když nezvedám.
+- `GET /call-log` (public, výjimka v middleware) — glass formulář, optimalizovaný mobile-first (formulář nahoře, ne centrovaný — klávesnice nepřekrývá)
+- **Server-side enrichment**: pokud `?phone=` sedí na známý kontakt v DB, `firstName` se použije pro oslovení **JEN když isVip**, jinak žádné oslovení
+- **`?phone=` skryje pole „Tvoje číslo"** přes `<input type="hidden">`
+- `POST /api/call-log/submit` (public) — honeypot, rate-limit 5/10min/IP, normalizace phonu, lookup VIP
+- **Při submitu:**
+  - Vytvoří `CallLog` (snapshot kontaktu i `wasVip`)
+  - Push do Todoistu — projekt podle isVip/isUrgent (vyruseni / vip), priorita 4 / 3 / 2, due `today` pro VIP+urgent
+  - Mail (přes `sendMail`) — jen pro VIP nebo urgent
+- **Apple touch icon** + `apple-mobile-web-app-capable` — VIP si uloží link na plochu jako appku, otevírá se bez Safari chrome, ikona velké serifové „G" na tmavé navy
+- `/firewall` — historie, mark vyřízeno (`seenAt`), filtry urgent/VIP
+
+### ✅ Dopisy (hotovo)
+Generování PDF hlavičkových dopisů přes různé odesílatelské identity.
+- `/letters` — archiv (search, filter per odesílatel, stáhnout PDF, regenerate, delete)
+- `/letters/new` + `/letters/[id]` — editor s dvoupanelovým layoutem (text vlevo, metadata vpravo)
+- **Per odesílatel:** logo, sken podpisu (PNG/JPG, max 4 MB), `redactPrompt` (vlastní AI prompt), `pdfTheme` (`classic` profesionální / `personal` osobní)
+- **Per dopis:** datum + místo, adresát z knihovny nebo ad-hoc, toggle „zobrazit i adresu adresáta"
+- **Tlačítko „Učesat"** — Gemini upraví styl podle prompt odesílatele + per-dopis override (např. „vypíchni tučně klíčové body")
+- **PDF generátor** — `lib/letter-pdf.ts` přes `@react-pdf/renderer`, A4 portrét
+  - Fonty Noto Sans + Noto Serif (kompletní česká diakritika; Helvetica defaultní v PDF padala na ě/š/č/ř/ž)
+  - Šablony větveny v `LetterTemplate({ theme })`:
+    - `classic`: adresát vpravo, plná patička (legalName · IČ · DIČ · email · phone · web · č.ú.)
+    - `personal`: bez adresáta, patička jen legalName · email · phone · web (bez IČ/DIČ/č.ú.)
+  - PDF cache na disk, invalidace při změně obsahu nebo redact
+- **Verzování** — `parentLetterId` + `version`, regenerate vytvoří novou verzi (kopie obsahu, nový datum), parent zůstane
+- **Disk persistence:**
+  - `UPLOADS_PATH=/data/uploads` (Docker volume → `/volume1/docker/raseliniste/uploads`)
+  - `lib/uploads.ts` — `saveUpload`, `deleteUpload`, `resolveUpload`, path-traversal blokovaný
+  - `/api/uploads/[...path]` servíruje s ownership check (kontroluje, že file patří useru)
+
+### ✅ E-mail (hotovo, dual SMTP/Resend)
+- `lib/mailer.ts` — priorita: **SMTP z DB** → Resend env → log fallback
+- `Nastavení → E-mail (SMTP)` — UI pro konfiguraci SMTP (Seznam/Gmail/Outlook preset + vlastní)
+- Heslo šifrované AES-256-GCM v `UserIntegration(provider="smtp")`
+- `transporter.verify()` při uložení — nedovolí ulož špatné credentials
+- Tlačítko „Poslat testovací mail"
+- Nahradilo Resend-only přístup (kolize s Seznam MX záznamy na apex doméně)
+
+### ✅ AI (Vertex / AI Studio dual-mode)
+- `lib/gemini.ts` — pokud `VERTEX_PROJECT` je vyplněný, klient běží na **Vertex AI** (region default `europe-west1`, autentizace přes `GOOGLE_APPLICATION_CREDENTIALS`)
+- Jinak fallback na **`GEMINI_API_KEY`** (Google AI Studio)
+- Startup log informuje, který mód běží
+- `GET /api/health/ai` — health check vrátí `{ mode, ok, elapsedMs, sample }` přes test prompt
+- `docker-compose.yml` má volume mount `./gcp-key.json:/app/gcp-key.json:ro`
+
 ### ✅ Settings (hotovo)
-Skupina v sidebaru, pět podstránek:
-- `/settings/tokens` — správa API tokenů (create/list/revoke)
-- `/settings/reports` — notification email (kam posílat)
-- `/settings/shortcuts` — návod pro 2 iPhone Shortcuty (Capture + Deník)
-- `/settings/ingest` — návod pro Health Auto Export aplikaci
+Skupina v sidebaru, sedm podstránek:
+- `/settings/integrations` — Todoist token + 3 dropdowny (Vyrušení / VIP / Moje úkoly)
+- `/settings/reports` — E-mail (SMTP konfigurace + sběrný email pro reporty)
+- `/settings/shortcuts` — návod pro iPhone Shortcuty (Capture + Deník)
+- `/settings/ingest` — návod pro Health Auto Export
+- `/settings/letter-senders` — odesílatelé dopisů (CRUD + logo/podpis upload + per-sender prompt + theme)
+- `/settings/tokens` — Rašeliniště API tokeny (pro iOS shortcut)
 
 ### 🔜 V plánu
-- **Todoist dispatch** (Iterace 2 Capture) — potvrzený TASK se pushne do Todoistu
-- **Knihovna** (Iterace 3) — samostatná stránka pro KNOWLEDGE entries, filtry, fulltext
+- **Capture iPhone Shortcut** — zatím v návodu, JSON body připravený
+- **Tasks/Notes pull sync z Todoistu** — pokud done v Todoistu, propsat do Rašeliniště
+- **Verzování UI v archivu dopisů** — vidět seznam v1/v2/v3 daného dopisu
+- **Další PDF témata** dopisů (kostra připravena, zatím classic + personal)
+- **Push notifikace** pro VIP firewall vzkazy (web push nebo Telegram bot)
 - **Ranní briefing** — Gemini shrne včerejšek + dnešek, denní cron
-- **Úkoly modul** — kanban view pro CONFIRMED TASK entries
-- **Poznámky / Kalendář / Kontakty / Finance / Soubory** — po jednom
-- **AI chat** — konverzační interface nad vlastními daty (RAG nad Recordings + Entries + Health)
-- **Claude kouč** — integrace na Anthropic projekt (pokud přes API)
+- **AI chat** — RAG nad vlastními daty (Recordings + Entries + Health)
+- **Claude kouč** — integrace na Anthropic projekt
 - **Superlist / Plaud** — externí integrace
 
 ---
@@ -327,7 +417,10 @@ Public paths (nepožadují cookie):
 - `/api/ingest` (Bearer), `/api/journal/ingest` (Bearer/x-api-key)
 - `/api/health-ingest` (x-api-key)
 - `/api/cron/*` (x-cron-key)
+- **`/call-log`, `/call-log/thanks`, `/api/call-log/submit`** (Gideonův Firewall, public form pro vzkazy)
 - `/_astro/*` (static assets)
+
+**Apex → www redirect** (`apexRedirect()` v middleware) — `raseliniste.cz/*` → 301 → `www.raseliniste.cz/*`. Cookies a passkey jsou vázané na hostname, takže nemůže existovat dva paralelní login states.
 
 ---
 
@@ -348,9 +441,29 @@ Kde co:
 | Capture klasifikace | Flash | `src/lib/classifier.ts` |
 | Journal AI redakce (učesání + hashtagy) | Flash | `src/lib/journal-redact.ts` |
 | Health analýza (manual + měsíční cron) | **Pro** | `src/lib/health-analyze.ts` |
+| Letter „Učesat" | Flash | `src/lib/letter-redact.ts` |
 | AI chat | Flash | `src/pages/api/ai/chat.ts` |
 
 Flash = primary. Pro jen tam, kde kvalita > rychlost a cena (zdravotní analýza je zásadní, za pár haléřů stojí).
+
+### Vertex AI vs. AI Studio (dual-mode)
+
+`getGemini()` kontroluje env:
+
+1. **`VERTEX_PROJECT` vyplněno** → klient běží na **Vertex AI**
+   - Region z `VERTEX_LOCATION` (default `europe-west1`)
+   - Autentizace z `GOOGLE_APPLICATION_CREDENTIALS` (cesta k service-account JSON, namountovaná do kontejneru z `/volume1/docker/raseliniste/gcp-key.json`)
+   - **Doporučeno pro produkci** — EU data residency, žádné trénování na promptech, GCP DPA
+
+2. **Jinak** → fallback na `GEMINI_API_KEY` (Google AI Studio)
+
+Při startu Node loguje použitý mód:
+```
+[gemini] Vertex AI mode — project=raseliniste-ai location=europe-west1
+[gemini] AI Studio API key mode (fallback — doporučeno přejít na Vertex)
+```
+
+`GET /api/health/ai` (auth: session) — vrátí `{ mode, ok, elapsedMs, sample }`, dělá test prompt přes `getGemini()`.
 
 ---
 
@@ -414,6 +527,84 @@ Rate limit `/api/journal/ingest`: **200 / 24 h** per user.
 | DELETE | `/api/health/analyses/:id` | session | — |
 
 Rate limit `/api/health/analyze`: **10 / 24 h** per user (Gemini Pro guard).
+
+### Tasks
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| GET | `/api/tasks` | session | `?includeCompleted=1` |
+| PATCH | `/api/tasks/:id` | session | `{completed: boolean}` |
+| DELETE | `/api/tasks/:id` | session | — |
+| POST | `/api/tasks/:id/todoist` | session | — (push do Todoistu, idempotent) |
+
+### Notes
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| GET | `/api/notes` | session | `?q&type&category&tag&includeCompleted=1` (vrací i `categories[]`, `tags[]`) |
+| PATCH | `/api/notes/:id` | session | `{completed: boolean}` |
+| DELETE | `/api/notes/:id` | session | — |
+
+### Contacts (Firewall kontakty)
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| GET | `/api/contacts` | session | `?q&vip=1` |
+| POST | `/api/contacts` | session | `{displayName, firstName?, lastName?, isVip?, phones[], emails[]}` |
+| PATCH | `/api/contacts/:id` | session | (partial update, replaces phones/emails arrays) |
+| DELETE | `/api/contacts/:id` | session | — |
+| POST | `/api/contacts/import` | session / multipart | vCard `file` nebo `{text}` + `?offset&limit` chunked (default 50) |
+
+### Call Log (Gideonův Firewall)
+| Method | Path | Auth | Body |
+|---|---|---|---|
+| GET | `/call-log` | **public** | (HTML formulář) |
+| POST | `/api/call-log/submit` | **public** | `{phone, message, isUrgent?, website (honeypot)}` |
+| GET | `/api/call-log` | session | `?unseen=1` (historie pro `/firewall`) |
+| PATCH | `/api/call-log/:id` | session | `{seen: boolean}` |
+
+Rate limit `/api/call-log/submit`: **5 / 10 min per IP**.
+
+### Integrations (Todoist + SMTP)
+| Method | Path | Auth | Body |
+|---|---|---|---|
+| POST | `/api/integrations/todoist` | session | `{token}` (testne přes `testConnection`, pak šifrovaně uloží) |
+| DELETE | `/api/integrations/todoist` | session | — |
+| GET | `/api/integrations/todoist/projects` | session | — (paginovaný list z Todoist v1 API) |
+| PATCH | `/api/integrations/todoist/config` | session | `{vyruseni?, vip?, mojeUkoly?}` (project IDs) |
+| POST | `/api/integrations/todoist/test` | session | — (verify connection) |
+| GET | `/api/settings/mail` | session | — |
+| POST | `/api/settings/mail` | session | `{host, port, secure, user, password, from}` (verify + save) |
+| DELETE | `/api/settings/mail` | session | — |
+| POST | `/api/settings/mail/test` | session | `{to}` (pošle test mail) |
+
+### Letters
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| GET | `/api/letters/senders` | session | — |
+| POST | `/api/letters/senders` | session | `{name, ...optional fields}` |
+| PATCH | `/api/letters/senders/:id` | session | (partial) |
+| DELETE | `/api/letters/senders/:id` | session | — (smaže i logo/podpis z disku) |
+| POST | `/api/letters/senders/:id/upload` | session / multipart | `kind=logo\|signature, file` |
+| DELETE | `/api/letters/senders/:id/upload` | session | `{kind}` |
+| GET | `/api/letters/recipients` | session | `?q` |
+| POST | `/api/letters/recipients` | session | `{name, addressLines?}` |
+| PATCH/DELETE | `/api/letters/recipients/:id` | session | — |
+| GET | `/api/letters` | session | `?q&senderId` |
+| POST | `/api/letters` | session | `{senderId, recipientId? \| recipientName+addressLines, bodyRaw, ...}` |
+| GET | `/api/letters/:id` | session | — (vrací i `versions[]`) |
+| PATCH | `/api/letters/:id` | session | (partial) — invaliduje PDF cache |
+| DELETE | `/api/letters/:id` | session | — |
+| POST | `/api/letters/:id/redact` | session | `{bodyRaw?, promptOverride?}` (Gemini „Učesat") |
+| POST | `/api/letters/:id/regenerate` | session | — (vytvoří novou verzi, parent zůstane) |
+| GET | `/api/letters/:id/pdf` | session | `?download=1` (cache na disk, invalidace při změně) |
+
+### Uploads
+| Method | Path | Auth | Popis |
+|---|---|---|---|
+| GET | `/api/uploads/[...path]` | session | servíruje disk soubor s ownership check (path-traversal blokovaný) |
+
+### Health checks
+| Method | Path | Auth | Popis |
+|---|---|---|---|
+| GET | `/api/health/ai` | session | mode + test prompt přes `getGemini()` |
 
 ### Cron
 | Method | Path | Auth | Query |
