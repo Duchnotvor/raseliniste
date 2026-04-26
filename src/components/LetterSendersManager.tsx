@@ -188,6 +188,9 @@ function SenderEditor({ sender, onChanged }: { sender: Sender; onChanged: () => 
   const [web, setWeb] = useState(sender.web ?? "");
   const [bank, setBank] = useState(sender.bankAccount ?? "");
   const [prompt, setPrompt] = useState(sender.redactPrompt);
+  const [theme, setTheme] = useState<"classic" | "personal">(
+    sender.pdfTheme === "personal" ? "personal" : "classic",
+  );
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +215,7 @@ function SenderEditor({ sender, onChanged }: { sender: Sender; onChanged: () => 
           web: web.trim() || null,
           bankAccount: bank.trim() || null,
           redactPrompt: prompt,
+          pdfTheme: theme,
         }),
       });
       const data = await res.json();
@@ -259,6 +263,43 @@ function SenderEditor({ sender, onChanged }: { sender: Sender; onChanged: () => 
 
   return (
     <div className="px-4 py-4 border-t border-white/5 space-y-4">
+      {/* Šablona dopisu */}
+      <div className="space-y-1">
+        <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono block">
+          Typ dopisu (šablona PDF)
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setTheme("classic")}
+            className={`text-left rounded-md border p-3 transition-colors ${
+              theme === "classic"
+                ? "border-[var(--c)] bg-[color-mix(in_oklch,var(--c)_10%,transparent)]"
+                : "border-white/10 hover:bg-white/5"
+            }`}
+          >
+            <div className="text-sm font-medium">Profesionální</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Adresát vpravo, plná patička (IČ, DIČ, č.ú.).
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTheme("personal")}
+            className={`text-left rounded-md border p-3 transition-colors ${
+              theme === "personal"
+                ? "border-[var(--c)] bg-[color-mix(in_oklch,var(--c)_10%,transparent)]"
+                : "border-white/10 hover:bg-white/5"
+            }`}
+          >
+            <div className="text-sm font-medium">Osobní</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Bez adresáta v hlavičce, patička bez IČ/DIČ/č.ú.
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* Loga */}
       <div className="grid grid-cols-2 gap-3">
         <UploadSlot

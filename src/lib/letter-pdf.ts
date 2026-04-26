@@ -1,7 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Document, Page, Text, View, Image, StyleSheet, pdf } from "@react-pdf/renderer";
+import { Document, Page, Text, View, Image, StyleSheet, pdf, Font } from "@react-pdf/renderer";
 import { createElement as h, type ReactElement } from "react";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveUpload, uploadExists } from "./uploads";
+
+// Registrace fontů s českou diakritikou (Noto Sans + Noto Serif).
+// Helvetica (default) nemá kompletní český Unicode — háčky a čárky padají.
+const FONT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../assets/fonts",
+);
+
+let fontsRegistered = false;
+function ensureFontsRegistered() {
+  if (fontsRegistered) return;
+  Font.register({
+    family: "NotoSans",
+    fonts: [
+      { src: path.join(FONT_DIR, "NotoSans-Regular.ttf") },
+      { src: path.join(FONT_DIR, "NotoSans-Bold.ttf"), fontWeight: 700 },
+    ],
+  });
+  Font.register({
+    family: "NotoSerif",
+    fonts: [
+      { src: path.join(FONT_DIR, "NotoSerif-Regular.ttf") },
+      { src: path.join(FONT_DIR, "NotoSerif-Bold.ttf"), fontWeight: 700 },
+    ],
+  });
+  fontsRegistered = true;
+}
 
 /**
  * PDF generátor dopisů (server-side přes @react-pdf/renderer).
@@ -47,7 +76,7 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
     paddingHorizontal: 60,
     fontSize: 11,
-    fontFamily: "Helvetica",
+    fontFamily: "NotoSans",
     color: "#1a1a1a",
     lineHeight: 1.45,
   },
@@ -67,8 +96,9 @@ const styles = StyleSheet.create({
     objectFit: "contain",
   },
   senderName: {
-    fontSize: 13,
-    fontFamily: "Helvetica-Bold",
+    fontSize: 14,
+    fontFamily: "NotoSerif",
+    fontWeight: 700,
     marginBottom: 3,
   },
   senderLine: {
@@ -82,7 +112,8 @@ const styles = StyleSheet.create({
     paddingTop: 50,
   },
   recipientName: {
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "NotoSans",
+    fontWeight: 700,
     fontSize: 11,
     marginBottom: 2,
   },
@@ -141,31 +172,45 @@ async function loadImageIfExists(relativePath: string | null): Promise<string | 
   return resolveUpload(relativePath);
 }
 
-function footerItems(s: LetterPdfData["sender"]): string[] {
+function footerItems(s: LetterPdfData["sender"], theme: "classic" | "personal"): string[] {
   const items: string[] = [];
   if (s.legalName) items.push(s.legalName);
-  if (s.ico) items.push(`IČ ${s.ico}`);
-  if (s.dic) items.push(`DIČ ${s.dic}`);
+  // Osobní šablona vynechává obchodní údaje (IČO, DIČ, č.ú.).
+  if (theme === "classic") {
+    if (s.ico) items.push(`IČ ${s.ico}`);
+    if (s.dic) items.push(`DIČ ${s.dic}`);
+  }
   if (s.email) items.push(s.email);
   if (s.phone) items.push(s.phone);
   if (s.web) items.push(s.web);
-  if (s.bankAccount) items.push(`č.ú. ${s.bankAccount}`);
+  if (theme === "classic" && s.bankAccount) {
+    items.push(`č.ú. ${s.bankAccount}`);
+  }
   return items;
 }
 
-function ClassicLetter({ data, logoSrc, signatureSrc }: {
+function LetterTemplate({
+  data,
+  logoSrc,
+  signatureSrc,
+  theme,
+}: {
   data: LetterPdfData;
   logoSrc: string | null;
   signatureSrc: string | null;
+  theme: "classic" | "personal";
 }): ReactElement {
   const dateStr = fmtCzechDate(data.letterDate);
   const dateHeader = data.place ? `${data.place} dne ${dateStr}` : dateStr;
   const paras = paragraphs(data.body);
-  const footerLines = footerItems(data.sender);
+  const footerLines = footerItems(data.sender, theme);
+
+  // Osobní šablona — bez adresáta (působí formálně). Klasická má adresáta vpravo.
+  const showRecipient = theme === "classic" && Boolean(data.recipient);
 
   return h(Document, null,
     h(Page as any, { size: "A4", style: styles.page },
-      // Top row: sender (left) + recipient (right)
+      // Hlavička: vlevo odesílatel (logo + jméno + adresa), vpravo adresát (jen classic)
       h(View, { style: styles.topRow },
         h(View, { style: styles.senderBlock },
           logoSrc && h(Image as any, { src: logoSrc, style: styles.senderLogo }),
@@ -174,7 +219,7 @@ function ClassicLetter({ data, logoSrc, signatureSrc }: {
             h(Text, { key: `s-${i}`, style: styles.senderLine }, line)
           ),
         ),
-        data.recipient && h(View, { style: styles.recipientBlock },
+        showRecipient && data.recipient && h(View, { style: styles.recipientBlock },
           h(Text, { style: styles.recipientName }, data.recipient.name),
           data.recipient.showAddress && data.recipient.addressLines.map((line, i) =>
             h(Text, { key: `r-${i}`, style: styles.recipientLine }, line)
@@ -182,22 +227,22 @@ function ClassicLetter({ data, logoSrc, signatureSrc }: {
         ),
       ),
 
-      // Date line (right-aligned)
+      // Datum (vpravo). U osobní šablony posunuto blíž k textu, protože nemáme adresáta.
       h(Text, { style: styles.dateLine }, dateHeader),
 
-      // Body
+      // Tělo dopisu
       h(View, { style: styles.body },
         ...paras.map((para, i) =>
           h(Text, { key: `p-${i}`, style: styles.paragraph }, para)
         ),
       ),
 
-      // Signature block
+      // Sken podpisu
       signatureSrc && h(View, { style: styles.signatureBlock },
         h(Image as any, { src: signatureSrc, style: styles.signatureImage }),
       ),
 
-      // Footer (sender contact info)
+      // Patička (kontakty odesílatele) — osobní vynechá IČO/DIČ/č.ú.
       footerLines.length > 0 && h(View, { style: styles.footer },
         ...footerLines.map((item, i) =>
           h(Text, { key: `f-${i}` }, item)
@@ -208,15 +253,14 @@ function ClassicLetter({ data, logoSrc, signatureSrc }: {
 }
 
 export async function renderLetterPdf(data: LetterPdfData): Promise<Buffer> {
+  ensureFontsRegistered();
   const logoSrc = await loadImageIfExists(data.sender.logoPath);
   const signatureSrc = await loadImageIfExists(data.sender.signaturePath);
 
-  // Pro budoucí přepínání témat podle data.sender.pdfTheme
-  // přepneme tady — zatím "classic" = default.
-  const doc = ClassicLetter({ data, logoSrc, signatureSrc });
+  const theme = data.sender.pdfTheme === "personal" ? "personal" : "classic";
+  const doc = LetterTemplate({ data, logoSrc, signatureSrc, theme });
 
   const stream = await pdf(doc as any).toBuffer();
-  // toBuffer vrací NodeJS.ReadableStream; sesbíráme do Bufferu
   return await streamToBuffer(stream);
 }
 
