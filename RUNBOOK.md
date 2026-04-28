@@ -275,6 +275,95 @@ gunzip -c rasel-2026-04-20.sql.gz | sudo docker exec -i raseliniste_db psql -U r
 
 ---
 
+## 7.5 Deploy nové verze — JEDEN PŘÍKAZ
+
+Standardní deploy = `~/deploy.sh`. Jednorázová instalace, pak při každém deployi
+stačí napsat `~/deploy.sh` a vše proběhne samo. Pořadí:
+
+1. **Push commit z Macu** přes GitHub Desktop
+2. **Počkej ~3 min** na GitHub Actions build (Actions tab v repu)
+3. **SSH na NAS** + napiš `~/deploy.sh`. Hotovo.
+
+### Jednorázová instalace skriptu (uděláš poprvé, pak nikdy znova)
+
+SSH na NAS, napiš (jeden blok):
+
+```bash
+sudo tee /root/deploy.sh > /dev/null << 'DEPLOY_EOF'
+#!/bin/sh
+set -e
+cd /volume1/docker/raseliniste
+
+echo "→ [1/4] Stahuji docker-compose.yml z GitHubu"
+curl -fsSL -o docker-compose.yml.new \
+  https://raw.githubusercontent.com/Duchnotvor/raseliniste/main/docker-compose.yml
+
+echo "→ [2/4] Validace YAML"
+mv docker-compose.yml docker-compose.yml.bak
+mv docker-compose.yml.new docker-compose.yml
+if ! docker compose config > /dev/null 2>&1; then
+  echo "❌ YAML invalid, vracím zálohu"
+  mv docker-compose.yml.bak docker-compose.yml
+  exit 1
+fi
+rm -f docker-compose.yml.bak
+
+echo "→ [3/4] Stahuji image z ghcr.io"
+docker compose pull
+
+echo "→ [4/4] Recreate kontejneru"
+docker compose up -d --force-recreate
+
+echo ""
+echo "→ Stav:"
+docker compose ps
+
+echo ""
+echo "→ Logy (posledních 15 řádků):"
+sleep 5
+docker compose logs app --tail 15
+
+echo ""
+echo "✓ Deploy hotový. Ověř v prohlížeči: https://www.raseliniste.cz"
+DEPLOY_EOF
+
+sudo chmod +x /root/deploy.sh
+```
+
+A volitelně alias, ať jen píšeš `deploy`:
+
+```bash
+echo "alias deploy='/root/deploy.sh'" | sudo tee -a /root/.profile
+source /root/.profile
+```
+
+### Použití (od teď napořád)
+
+Po každém pushu na GitHub:
+
+```bash
+deploy
+# nebo bez aliasu: ~/deploy.sh
+# nebo: sudo /root/deploy.sh
+```
+
+Skript:
+1. Stáhne nejnovější `docker-compose.yml` z GitHubu (žádné ruční editace YAML)
+2. Validuje syntaxi (pokud rozbitý → vrátí zálohu, neselže)
+3. Pulluje novou image z ghcr.io
+4. Recreate kontejneru (`up -d --force-recreate`)
+5. Ukáže status + posledních 15 logů
+
+**Pokud něco selže**, vrátí poslední pracovní compose ze zálohy a vypíše chybu.
+
+### Odstranění problémů
+
+- `Image is up to date` → GitHub Actions build ještě neskončil. Počkej 1-2 min.
+- `permission denied` na `gcp-key.json` → `sudo chmod 644 /volume1/docker/raseliniste/gcp-key.json`
+- Aplikace nestartuje → `docker compose logs app --tail 100` a pošli error.
+
+---
+
 ## 8. Restart / Logy / Troubleshoot
 
 ### Rychlý restart kontejneru
@@ -371,6 +460,42 @@ Tyhle věci nás v minulosti shodily, ať se neopakují:
    - Pokud řekne *Image is up to date* hned po pushi, GitHub Actions build
      ještě nedoběhl. Počkej 1-2 min a `pull` znovu.
    - Po stažení **vždy `up -d --force-recreate`** (jen `up -d` to nereinicializuje).
+
+9. **`docker-compose.yml` na NASu se NEAUTO aktualizuje.**
+   - Když do něj přidám novou env proměnnou (např. `VERTEX_PROJECT`),
+     na NASu pořád běží stará verze, dokud ji ručně nepřepíšeš.
+   - Projevilo se: `docker compose exec app env` neukazoval `VERTEX_PROJECT`,
+     i když `.env` ho měl. Compose musí mít odpovídající `environment:` blok.
+   - Řešení: deploy script `~/deploy.sh` níže to dělá automaticky přes
+     `curl` z GitHubu.
+
+10. **`gcp-key.json` permissions: 600 nestačí, použij 644.**
+    - Kontejner běží jako neroot uživatel uvnitř (typicky `node` UID 1000).
+    - `chmod 600` (root-only) → kontejner dostane `EACCES: permission denied`.
+    - `chmod 644` (read-all) je správně. Soubor je v Docker volume, takže
+      ostatní procesy na NASu k němu nemají přístup bez sudo.
+    - Stejné platí pro jiné secret JSON soubory mountované do kontejneru.
+
+11. **Vertex audio > 18 MB jde přes Files API, ne inline.**
+    - Gemini API limit pro inline audio = 20 MB. 90min M4A 64 kbps má ~40 MB.
+    - V `lib/audio-transcribe.ts` se velké soubory uploadují přes `genai.files.upload()`,
+      pak se reference v `generateContent` přes `fileData.fileUri`.
+    - Pro inline má přednost (nižší latence) — pouze nad 18 MB Files API.
+
+12. **Heredoc paste do souboru = catastrophe.**
+    - Stalo se: vložení `cat << EOF | tee -a .env ... EOF` přes klávesnici
+      do nano/vi vyústilo v zapsání PŘÍKAZU jako TEXTU do souboru.
+    - Pokud `docker-compose.yml` má na konci řádky typu `sudo tee -a .env...`,
+      vyřeš to:
+      ```bash
+      sudo sed -i '/^sudo tee/,$d' /volume1/docker/raseliniste/docker-compose.yml
+      sudo docker compose config > /dev/null && echo OK
+      ```
+    - Heredoc patří **do shellu** (přímo jako příkaz), ne do souboru.
+
+13. **Standard deploy proces — `~/deploy.sh` skript** (viz sekce „Deploy"
+    níže). Jeden příkaz `~/deploy.sh` udělá vše: aktualizuje compose,
+    pulluje image, recreate, ukáže logy.
 
 ### Časté problémy → fix
 
