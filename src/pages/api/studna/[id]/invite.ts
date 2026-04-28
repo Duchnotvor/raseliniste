@@ -3,6 +3,7 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { readSession } from "@/lib/session";
+import { env } from "@/lib/env";
 
 export const prerender = false;
 
@@ -86,8 +87,14 @@ export const POST: APIRoute = async ({ request, cookies, params }) => {
     },
   });
 
-  const baseUrl = new URL(request.url).origin;
-  const link = `${baseUrl}/me/${guest.guestToken}`;
+  // Server zevnitř kontejneru vidí request.url jako localhost:3000.
+  // Použij APP_URL z .env (canonical) nebo X-Forwarded-Host fallback.
+  const fwdHost = request.headers.get("x-forwarded-host");
+  const fwdProto = request.headers.get("x-forwarded-proto") ?? "https";
+  const baseUrl =
+    env.APP_URL ??
+    (fwdHost ? `${fwdProto}://${fwdHost}` : new URL(request.url).origin);
+  const link = `${baseUrl.replace(/\/$/, "")}/me/${guest.guestToken}`;
 
   return Response.json({
     ok: true,
