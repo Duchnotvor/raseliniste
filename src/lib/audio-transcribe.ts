@@ -130,6 +130,10 @@ function extractJson(text: string): string {
   return trimmed;
 }
 
+// Inline audio limit (Gemini API): 20 MB. Větší pošleme přes Files API,
+// kde dostane URI a my v generateContent referencujeme `fileData`.
+const INLINE_AUDIO_LIMIT_BYTES = 18 * 1024 * 1024; // 18 MB s rezervou
+
 export async function transcribeAudio(params: {
   audio: Buffer;
   mimeType: string;
@@ -143,25 +147,57 @@ export async function transcribeAudio(params: {
     ? BRIEF_PROMPT(params.projectContext ?? null)
     : STANDARD_PROMPT(params.projectContext ?? null);
 
+  // Připrav audio part — buď inline (malé) nebo přes Files API (velké briefy)
+  let audioPart: { inlineData: { mimeType: string; data: string } } | { fileData: { mimeType: string; fileUri: string } };
+
+  if (params.audio.byteLength <= INLINE_AUDIO_LIMIT_BYTES) {
+    audioPart = {
+      inlineData: {
+        mimeType: params.mimeType,
+        data: params.audio.toString("base64"),
+      },
+    };
+  } else {
+    // Files API — pošli soubor (Blob), získej URI, reference v generateContent.
+    const blob = new Blob([params.audio.buffer.slice(params.audio.byteOffset, params.audio.byteOffset + params.audio.byteLength) as ArrayBuffer], {
+      type: params.mimeType,
+    });
+    const uploaded = await genai.files.upload({
+      file: blob,
+      config: { mimeType: params.mimeType },
+    });
+    if (!uploaded.uri || !uploaded.mimeType) {
+      throw new Error("Gemini Files API: upload neselhal nevrátil uri/mimeType.");
+    }
+    // Počkej, až bude soubor ACTIVE (Gemini Files má asynchronní processing)
+    let file = uploaded;
+    let attempts = 0;
+    while (file.state !== "ACTIVE" && attempts < 60) {
+      await new Promise((r) => setTimeout(r, 1500));
+      file = await genai.files.get({ name: uploaded.name! });
+      attempts++;
+      if (file.state === "FAILED") {
+        throw new Error("Gemini Files: zpracování souboru selhalo.");
+      }
+    }
+    if (file.state !== "ACTIVE") {
+      throw new Error("Gemini Files: timeout při čekání na zpracování souboru.");
+    }
+    audioPart = {
+      fileData: { mimeType: file.mimeType!, fileUri: file.uri! },
+    };
+  }
+
   const response = await genai.models.generateContent({
     model,
     contents: [
       {
         role: "user",
-        parts: [
-          {
-            inlineData: {
-              mimeType: params.mimeType,
-              data: params.audio.toString("base64"),
-            },
-          },
-          { text: prompt },
-        ],
+        parts: [audioPart as never, { text: prompt }],
       },
     ],
     config: {
       temperature: 0.3,
-      // Pro brief dovolíme delší výstup
       maxOutputTokens: isBrief ? 32000 : 8000,
       responseMimeType: "application/json",
     },
