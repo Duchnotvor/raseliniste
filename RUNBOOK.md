@@ -300,6 +300,78 @@ sudo docker exec -it raseliniste_app sh
 # teď jsi uvnitř /app
 ```
 
+---
+
+### ⚠️ Časté pasti při deploy a editaci configu na NASu
+
+Tyhle věci nás v minulosti shodily, ať se neopakují:
+
+1. **Synology nemá `nano`, jen `vi`.**
+   - `sudo nano <file>` → `sudo: nano: command not found`
+   - Použij `sudo vi <file>` (insert: `i`, save+exit: `Esc` pak `:wq`).
+   - Nebo neinteraktivní append přes `tee`/`sed` — viz níže.
+
+2. **Heredoc příkazy musí běžet v shellu, NE se vkládat do souborů.**
+   - Když chceš doplnit řádky do `.env`, použij **v shellu**:
+     ```bash
+     cat << 'EOF' | sudo tee -a /volume1/docker/raseliniste/.env > /dev/null
+
+     # ---- Vertex AI ----
+     VERTEX_PROJECT=raseliniste
+     VERTEX_LOCATION=europe-west1
+     GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
+     EOF
+     ```
+   - **Nikdy** to nevkládej do souboru přes `vi` — heredoc se zapíše doslova jako text.
+   - **Stalo se nám:** vložení heredoc bloku do `docker-compose.yml` rozbilo YAML →
+     `parsing docker-compose.yml: yaml: line 50: could not find expected ':'`.
+   - **Oprava** (smaž od korupčního řádku do konce):
+     ```bash
+     sudo sed -i '/^sudo tee/,$d' /volume1/docker/raseliniste/docker-compose.yml
+     sudo docker compose config > /dev/null && echo OK
+     ```
+
+3. **`docker compose restart` nečte změny v `.env`.**
+   - Jen restartuje proces se starými env hodnotami.
+   - Pro aplikaci `.env` změn použij vždy:
+     ```bash
+     sudo docker compose up -d --force-recreate
+     ```
+
+4. **Validace YAML před recreate** ti ušetří pád.
+   ```bash
+   sudo docker compose config > /dev/null && echo OK || echo ROZBITY
+   ```
+
+5. **`gcp-key.json` práva.** Přes File Station nahraný soubor často skončí
+   s vlastníkem typu `mediaface_sftp_upload` a permissions `755 + ACL`.
+   Hned po nahrání:
+   ```bash
+   sudo chown root:root /volume1/docker/raseliniste/gcp-key.json
+   sudo chmod 600 /volume1/docker/raseliniste/gcp-key.json
+   sudo setfacl -b /volume1/docker/raseliniste/gcp-key.json 2>/dev/null
+   ```
+   Po `ls -la` musí vlastník být `root` a perms `-rw-------` (žádný `+` na konci).
+
+6. **MIME whitelist v `lib/uploads.ts` ignoruje codec parametry.**
+   - Browser MediaRecorder posílá `audio/webm; codecs=opus` (s parametry)
+   - iOS Voice Memos exportuje `audio/x-m4a`
+   - `extFromMime()` musí strippovat parametry (`split(";")[0]`) a mít whitelist:
+     `audio/webm`, `audio/mp4`, `audio/x-m4a`, `audio/m4a`, `audio/mpeg`,
+     `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`.
+   - Pokud `Nepodporovaný typ souboru: audio/...` → doplnit do whitelist.
+
+7. **Po edit `.env` ověř, že se to opravdu zapsalo.**
+   ```bash
+   tail -10 /volume1/docker/raseliniste/.env
+   sudo grep -E "VERTEX|GOOGLE_APPLICATION" /volume1/docker/raseliniste/.env
+   ```
+
+8. **`docker compose pull` musí stáhnout novou image, ne říct „up to date".**
+   - Pokud řekne *Image is up to date* hned po pushi, GitHub Actions build
+     ještě nedoběhl. Počkej 1-2 min a `pull` znovu.
+   - Po stažení **vždy `up -d --force-recreate`** (jen `up -d` to nereinicializuje).
+
 ### Časté problémy → fix
 
 | Symptom | Řešení |
