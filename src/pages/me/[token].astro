@@ -1,0 +1,109 @@
+---
+import Base from "../../layouts/Base.astro";
+import GuestRecorder from "../../components/GuestRecorder";
+import { prisma } from "../../lib/db";
+
+const token = Astro.params.token;
+let guest: { name: string; email: string } | null = null;
+let projects: Array<{
+  id: string;
+  name: string;
+  homeTitle: string | null;
+  description: string | null;
+  canRecordBrief: boolean;
+}> = [];
+
+if (token) {
+  const g = await prisma.guestUser.findUnique({
+    where: { guestToken: token },
+    include: {
+      invitations: {
+        where: { project: { archivedAt: null } },
+        include: {
+          project: { select: { id: true, name: true, homeTitle: true, description: true } },
+        },
+      },
+    },
+  });
+  if (g) {
+    guest = { name: g.name, email: g.email };
+    projects = g.invitations.map((inv) => ({
+      id: inv.project.id,
+      name: inv.project.name,
+      homeTitle: inv.project.homeTitle,
+      description: inv.project.description,
+      canRecordBrief: inv.canRecordBrief,
+    }));
+    // Touch lastSeenAt asynchronně (fire-and-forget)
+    prisma.guestUser.update({
+      where: { id: g.id },
+      data: { lastSeenAt: new Date() },
+    }).catch(() => null);
+  }
+}
+
+// Apple home title — pokud má 1 projekt, použij jeho homeTitle/name (max 12 char celkem),
+// jinak generický "Studna".
+let appleTitle = "Studna";
+if (projects.length === 1) {
+  const p = projects[0];
+  appleTitle = p.homeTitle ? `G: ${p.homeTitle}` : `G: ${p.name.slice(0, 9)}`;
+}
+---
+
+<Base
+  title={guest ? `Studna · ${guest.name}` : "Studna"}
+  appleTitle={appleTitle}
+  appleCapable={true}
+>
+  <div class="min-h-screen px-4 pt-8 sm:pt-14 pb-10 relative z-10">
+    <div class="w-full max-w-md mx-auto">
+      {!guest ? (
+        <div class="glass-strong rounded-xl p-8 text-center">
+          <img
+            src="/apple-touch-icon.png"
+            alt="Gideon"
+            width="64"
+            height="64"
+            class="mx-auto mb-4 rounded-[14px] shadow-lg shadow-black/40"
+          />
+          <h1 class="font-serif text-2xl tracking-tight mb-3">Odkaz nefunguje</h1>
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            Tenhle odkaz neexistuje nebo byl zrušen. Zkontaktuj prosím Petra,
+            aby ti poslal nový.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div class="mb-6 text-center">
+            <img
+              src="/apple-touch-icon.png"
+              alt="Studna"
+              width="64"
+              height="64"
+              class="mx-auto mb-4 rounded-[14px] shadow-lg shadow-black/40"
+            />
+            <div class="text-xs uppercase tracking-[0.22em] text-muted-foreground font-mono mb-2">
+              Ahoj, {guest.name}
+            </div>
+            <h1 class="font-serif text-3xl tracking-tight">Studna</h1>
+            <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
+              Nahrávárna pro projekty, do kterých tě Petr pozval.
+            </p>
+          </div>
+
+          <GuestRecorder
+            client:load
+            token={token!}
+            initialProjects={projects}
+            guestName={guest.name}
+          />
+
+          <p class="mt-6 text-center text-[11px] text-muted-foreground font-mono tracking-wider">
+            Tip: přidej tuhle stránku na plochu (Sdílet → Přidat na plochu).
+          </p>
+        </>
+      )}
+    </div>
+  </div>
+</Base>

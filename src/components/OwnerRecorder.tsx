@@ -1,0 +1,278 @@
+import { useEffect, useRef, useState } from "react";
+import { Mic, Square, Loader2, CheckCircle2, AlertTriangle, Upload, FileAudio } from "lucide-react";
+
+interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+type Phase = "idle" | "recording" | "uploading" | "done" | "error";
+const STANDARD_LIMIT_SEC = 10 * 60;
+const TICK_MS = 250;
+
+export default function OwnerRecorder({
+  ownerName,
+  projects,
+}: {
+  ownerName: string;
+  projects: Project[];
+}) {
+  const [selectedId, setSelectedId] = useState(projects[0]?.id ?? "");
+  const selected = projects.find((p) => p.id === selectedId);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [briefMode, setBriefMode] = useState(false);
+  const [briefFile, setBriefFile] = useState<File | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const startedAtRef = useRef<number>(0);
+  const tickRef = useRef<number | null>(null);
+  const briefInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (tickRef.current) window.clearInterval(tickRef.current);
+      audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  if (projects.length === 0) {
+    return (
+      <div className="glass-strong rounded-xl p-6 text-center">
+        <p className="text-sm text-muted-foreground mb-4">
+          Nemáš zatím žádný projekt. Vytvoř první ve Studně.
+        </p>
+        <a
+          href="/studna"
+          className="inline-block px-4 py-2 rounded-md bg-foreground/90 text-background text-sm font-medium"
+        >
+          Otevřít Studnu
+        </a>
+      </div>
+    );
+  }
+
+  function pickMime(): string {
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+    for (const c of candidates) {
+      try { if (MediaRecorder.isTypeSupported(c)) return c; } catch {}
+    }
+    return "audio/webm";
+  }
+
+  async function startRecording() {
+    setError(null);
+    setPhase("recording");
+    setElapsedMs(0);
+    audioChunksRef.current = [];
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      const mr = new MediaRecorder(stream, { mimeType: pickMime() });
+      mediaRecorderRef.current = mr;
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.start();
+      startedAtRef.current = Date.now();
+      tickRef.current = window.setInterval(() => {
+        const ms = Date.now() - startedAtRef.current;
+        setElapsedMs(ms);
+        if (ms >= STANDARD_LIMIT_SEC * 1000) stopRecording();
+      }, TICK_MS);
+    } catch (e) {
+      setPhase("error");
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function stopRecording() {
+    if (tickRef.current) { window.clearInterval(tickRef.current); tickRef.current = null; }
+    const mr = mediaRecorderRef.current;
+    if (!mr || mr.state === "inactive") return;
+    const stop = new Promise<void>((resolve) => { mr.onstop = () => resolve(); });
+    mr.stop();
+    audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+    audioStreamRef.current = null;
+    await stop;
+    const finalMs = Date.now() - startedAtRef.current;
+    const blob = new Blob(audioChunksRef.current, { type: mr.mimeType });
+    await upload(blob, "STANDARD", Math.round(finalMs / 1000));
+  }
+
+  async function upload(audio: Blob, type: "STANDARD" | "BRIEF", durationSec: number) {
+    setPhase("uploading");
+    const fd = new FormData();
+    fd.append("type", type);
+    fd.append("durationSec", String(durationSec));
+    fd.append("audio", new File([audio], "recording", { type: audio.type }));
+
+    const res = await fetch(`/api/studna/${selectedId}/recording`, { method: "POST", body: fd });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setPhase("error");
+      setError(data.error ?? `Server vrátil ${res.status}`);
+      return;
+    }
+    setPhase("done");
+    setTimeout(() => {
+      setPhase("idle");
+      setBriefMode(false);
+      setBriefFile(null);
+      setElapsedMs(0);
+    }, 4000);
+  }
+
+  const remainingMs = Math.max(0, STANDARD_LIMIT_SEC * 1000 - elapsedMs);
+  const remM = Math.floor(remainingMs / 60000);
+  const remS = Math.floor((remainingMs % 60000) / 1000).toString().padStart(2, "0");
+  const elM = Math.floor(elapsedMs / 60000);
+  const elS = Math.floor((elapsedMs % 60000) / 1000).toString().padStart(2, "0");
+
+  return (
+    <div className="space-y-4">
+      <div className="glass-strong rounded-xl p-4">
+        <label className="block text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-mono mb-1.5">
+          Do kterého projektu nahráváš?
+        </label>
+        <select
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          disabled={phase !== "idle"}
+          className="w-full px-3 py-2.5 rounded-md bg-background/40 border border-border/60 focus:border-primary focus:outline-none text-base"
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        {selected?.description && (
+          <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{selected.description}</p>
+        )}
+      </div>
+
+      <div className="glass-strong rounded-xl p-6 text-center min-h-[280px] flex flex-col items-center justify-center gap-4">
+        {phase === "idle" && !briefMode && (
+          <>
+            <button
+              onClick={startRecording}
+              disabled={!selectedId}
+              className="size-24 rounded-full bg-[var(--tint-peach)] text-black grid place-items-center shadow-xl shadow-black/30 hover:scale-105 transition-transform active:scale-95 disabled:opacity-40"
+            >
+              <Mic className="size-10" />
+            </button>
+            <div className="text-base font-medium">Tap pro záznam</div>
+            <div className="text-xs text-muted-foreground font-mono">
+              max 10 min · auto-stop · {ownerName}
+            </div>
+            <button
+              onClick={() => setBriefMode(true)}
+              className="mt-3 text-xs font-mono text-muted-foreground hover:text-foreground underline"
+            >
+              Klíčový brief — nahrát soubor →
+            </button>
+          </>
+        )}
+
+        {phase === "idle" && briefMode && (
+          <>
+            <FileAudio className="size-12 text-[var(--tint-mint)]" />
+            <div className="text-base font-medium">Klíčový brief</div>
+            {briefFile ? (
+              <>
+                <div className="text-sm font-mono">{briefFile.name}</div>
+                <div className="text-xs text-muted-foreground">{Math.round(briefFile.size / 1024 / 1024)} MB</div>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => upload(briefFile, "BRIEF", 0)}
+                    className="px-4 py-2 rounded-md bg-[var(--tint-mint)] text-black text-sm font-medium"
+                  >
+                    Odeslat brief
+                  </button>
+                  <button
+                    onClick={() => setBriefFile(null)}
+                    className="px-3 py-2 rounded-md hover:bg-white/5 text-sm text-muted-foreground"
+                  >
+                    Změnit
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                onClick={() => briefInputRef.current?.click()}
+                className="px-5 py-3 rounded-md bg-[var(--tint-mint)] text-black font-medium flex items-center gap-2"
+              >
+                <Upload className="size-4" /> Vybrat soubor
+              </button>
+            )}
+            <input
+              ref={briefInputRef}
+              type="file"
+              accept="audio/*,.m4a,.mp3,.wav,.webm,.mp4"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) setBriefFile(f);
+                e.target.value = "";
+              }}
+            />
+            <button
+              onClick={() => { setBriefMode(false); setBriefFile(null); }}
+              className="mt-1 text-xs font-mono text-muted-foreground hover:text-foreground"
+            >
+              ← zpět na záznam
+            </button>
+          </>
+        )}
+
+        {phase === "recording" && (
+          <>
+            <div className="size-24 rounded-full bg-destructive/20 grid place-items-center animate-pulse">
+              <div className="size-12 rounded-full bg-destructive" />
+            </div>
+            <div className="font-mono text-4xl tabular-nums">{remM}:{remS}</div>
+            <div className="text-xs text-muted-foreground font-mono">uplynulo {elM}:{elS}</div>
+            <button
+              onClick={stopRecording}
+              className="mt-2 px-6 py-3 rounded-md bg-foreground/90 text-background font-medium flex items-center gap-2"
+            >
+              <Square className="size-4 fill-current" /> Stop
+            </button>
+          </>
+        )}
+
+        {phase === "uploading" && (
+          <>
+            <Loader2 className="size-12 animate-spin text-[var(--tint-peach)]" />
+            <div className="text-base font-medium">Zpracovávám…</div>
+            <div className="text-xs text-muted-foreground">AI rozbor po nahrání</div>
+          </>
+        )}
+
+        {phase === "done" && (
+          <>
+            <CheckCircle2 className="size-16 text-[var(--tint-sage)]" />
+            <div className="text-lg font-medium">Záznam uložen ✓</div>
+          </>
+        )}
+
+        {phase === "error" && (
+          <>
+            <AlertTriangle className="size-12 text-destructive" />
+            <div className="text-base font-medium">Chyba</div>
+            <div className="text-xs text-destructive max-w-xs">{error}</div>
+            <button
+              onClick={() => { setPhase("idle"); setError(null); }}
+              className="mt-2 px-4 py-2 rounded-md hover:bg-white/5 text-sm text-muted-foreground"
+            >
+              Zkusit znovu
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

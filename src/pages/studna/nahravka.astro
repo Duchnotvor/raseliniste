@@ -1,0 +1,36 @@
+---
+import Shell from "../../layouts/Shell.astro";
+import OwnerRecorder from "../../components/OwnerRecorder";
+import { prisma } from "../../lib/db";
+import { readSession } from "../../lib/session";
+
+const session = await readSession(Astro.cookies);
+if (!session) return Astro.redirect("/login");
+
+const user = await prisma.user.findUnique({
+  where: { id: session.uid },
+  select: { username: true },
+});
+if (!user) return Astro.redirect("/login");
+
+const projects = await prisma.projectBox.findMany({
+  where: { userId: session.uid, archivedAt: null },
+  select: { id: true, name: true, description: true },
+  orderBy: { name: "asc" },
+});
+---
+
+<Shell
+  title="Nahrávka · Studna"
+  username={user.username}
+  heading="Nahrávka"
+  breadcrumb={[{ label: "Studna", href: "/studna" }, { label: "Nahrávka" }]}
+>
+  <div class="max-w-md mx-auto">
+    <OwnerRecorder
+      client:load
+      ownerName={user.username}
+      projects={projects}
+    />
+  </div>
+</Shell>

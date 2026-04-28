@@ -2,7 +2,7 @@
 
 Osobní informační systém Petra „Gideona" Perniy. Jeden uživatel, maximum bezpečnosti, postupné rozšiřování.
 
-> **TL;DR:** Astro 6 + React 19 islands + Prisma 7 + PostgreSQL 16, běží na Synology DS718+ v Dockeru, deploy přes ghcr.io. Design **Liquid Glass** na dark navy pozadí. Login je **heslo + passkey (Touch ID)**. Devět živých modulů: **Capture** (diktát → Gemini → triage → auto-push do Todoistu), **Úkoly** (`/tasks`, grupované podle when), **Poznámky** (`/notes`, KNOWLEDGE+THOUGHT), **Deník** (`/journal`, AI redakce, lokace), **Zdraví** (HAE + dashboard + AI analýzy), **Kontakty** (vCard import, VIP), **Gideonův Firewall** (`/call-log`, public form → Todoist + mail), **Dopisy** (`/letters`, 2 PDF šablony, učesat AI), **E-mail** (SMTP přes UI: Seznam/Gmail/…). AI běží na **Vertex AI** (EU region) nebo Gemini API key.
+> **TL;DR:** Astro 6 + React 19 islands + Prisma 7 + PostgreSQL 16, běží na Synology DS718+ v Dockeru, deploy přes ghcr.io. Design **Liquid Glass** na dark navy pozadí. Login je **heslo + passkey (Touch ID)**. Deset živých modulů: **Capture** (diktát → Gemini → triage → auto-push do Todoistu), **Úkoly** (`/tasks`, grupované podle when), **Poznámky** (`/notes`, KNOWLEDGE+THOUGHT), **Deník** (`/journal`, AI redakce, lokace), **Zdraví** (HAE + dashboard + AI analýzy), **Kontakty** (vCard import, VIP), **Gideonův Firewall** (`/call-log`, public form → Todoist + mail), **Dopisy** (`/letters`, 2 PDF šablony, učesat AI), **Studna** (`/studna`, sdílené projektové boxíky s hlasovými záznamy + AI rozborem + brief upload + denní digest), **E-mail** (SMTP přes UI: Seznam/Gmail/…). AI běží na **Vertex AI** (EU region) nebo Gemini API key.
 
 ---
 
@@ -253,6 +253,13 @@ raseliniste/
 ### Tasks/Notes (extension Entry)
 - **Entry** doplněn o `todoistTaskId`, `todoistProjectId` (push do Todoistu) a `completedAt` (mark done v /tasks /notes).
 
+### Studna (sdílené projektové boxíky)
+- **ProjectBox** — `name`, `homeTitle` (max 9 znaků pro „G: …" na ploše iPhone), `description` (kontext pro AI prompt), `extractionPrompt` (volitelný override), `includeInDigest` (zda zahrnout do denního souhrnu).
+- **GuestUser** — globální host identita per email (per owner), `guestToken` v URL `/me/<token>`. Stejný host = stejný link napříč projekty (jeden link, jedna ikona na ploše).
+- **ProjectInvitation** — many-to-many `GuestUser ↔ ProjectBox` s per-projekt permission `canRecordBrief`.
+- **ProjectRecording** — `type: STANDARD | BRIEF`, `transcript` (vždy plný), `analysis Json` (strukturovaný JSON od Gemini), `audioPath` (cleanup cron maže STANDARD po 14 dnech, briefy + pinned navždy), `isPinned`, `isOwner`, `authorName` (snapshot).
+- **ProjectSummary** — markdown výstup z `summarizeProject()` (Gemini Pro, briefy primární kontext).
+
 ### Dopisy
 - **LetterSender** — `name` (interní), `legalName`, `ico`, `dic`, `addressLines[]`, kontakt (e-mail/telefon/web/banka), `logoPath`, `signaturePath`, **`redactPrompt`** (per-odesílatel AI prompt pro „Učesat"), **`pdfTheme`** (`classic` | `personal`).
 - **LetterRecipient** — `name`, `addressLines[]`. Knihovna sdílená napříč dopisy; lze i ad-hoc per dopis.
@@ -355,6 +362,20 @@ Generování PDF hlavičkových dopisů přes různé odesílatelské identity.
   - `lib/uploads.ts` — `saveUpload`, `deleteUpload`, `resolveUpload`, path-traversal blokovaný
   - `/api/uploads/[...path]` servíruje s ownership check (kontroluje, že file patří useru)
 
+### ✅ Studna (hotovo)
+Sdílené projektové boxíky s hlasovými záznamy.
+- `/studna` — list projektů, KPI per projekt
+- `/studna/:id` — detail, 4 taby: Záznamy, Hosti, Souhrny, Nastavení
+- `/studna/nahravka` — owner recorder (jeden URL pro všechny projekty s dropdownem, jedna ikona na ploše)
+- `/me/:guestToken` — public host page s MediaRecorder + countdown 10 min + auto-stop, kontextový dropdown projektů (1+ projektů)
+- **Dva typy záznamů:**
+  - **STANDARD** (Flash 2.5, max 10 min, audio cleanup po 14 dnech pokud není pinned)
+  - **BRIEF** (Pro 2.5 hluboká analýza s glossary/actors/decision_history, max 90 min, file upload, audio nikdy nemizí)
+- **AI rozbor:** strukturovaný JSON s `summary`, `key_themes`, `thoughts[]` (importance + rationale + category), `open_questions`, `sentiment`, `intensity_signals` (+ brief: `glossary`, `actors`, `decision_history`)
+- **Project summary** — Pro model nad všemi recordings (briefy primární kontext) — strukturovaný markdown dokument o stavu projektu
+- **Cron:** `daily-projects-digest` (18:00 — souhrn nepošle pokud nic nepřibylo), `cleanup-audio` (03:00 — STANDARD older 14d & not pinned)
+- **Onboarding PDFs** — 2 šablony (Standard + Brief) generované přes `@react-pdf/renderer`, owner si stáhne v admin a pošle hostovi mailem
+
 ### ✅ E-mail (hotovo, dual SMTP/Resend)
 - `lib/mailer.ts` — priorita: **SMTP z DB** → Resend env → log fallback
 - `Nastavení → E-mail (SMTP)` — UI pro konfiguraci SMTP (Seznam/Gmail/Outlook preset + vlastní)
@@ -418,6 +439,7 @@ Public paths (nepožadují cookie):
 - `/api/health-ingest` (x-api-key)
 - `/api/cron/*` (x-cron-key)
 - **`/call-log`, `/call-log/thanks`, `/api/call-log/submit`** (Gideonův Firewall, public form pro vzkazy)
+- **`/me/*`, `/api/me/*`** (Studna host links, autorizace přes `guestToken` v URL)
 - `/_astro/*` (static assets)
 
 **Apex → www redirect** (`apexRedirect()` v middleware) — `raseliniste.cz/*` → 301 → `www.raseliniste.cz/*`. Cookies a passkey jsou vázané na hostname, takže nemůže existovat dva paralelní login states.
@@ -606,10 +628,33 @@ Rate limit `/api/call-log/submit`: **5 / 10 min per IP**.
 |---|---|---|---|
 | GET | `/api/health/ai` | session | mode + test prompt přes `getGemini()` |
 
+### Studna
+| Method | Path | Auth | Body / Query |
+|---|---|---|---|
+| GET | `/api/studna` | session | — (list projektů s _count) |
+| POST | `/api/studna` | session | `{name, homeTitle?, description?, extractionPrompt?}` |
+| GET | `/api/studna/:id` | session | — (detail s invitations + recordings + summaries) |
+| PATCH | `/api/studna/:id` | session | (partial update + `archive: bool`) |
+| DELETE | `/api/studna/:id` | session | — |
+| POST | `/api/studna/:id/invite` | session | `{name, email, phone?, canRecordBrief?}` (vrací invite link) |
+| PATCH | `/api/studna/:id/invitations/:guestId` | session | `{canRecordBrief}` |
+| DELETE | `/api/studna/:id/invitations/:guestId` | session | — |
+| POST | `/api/studna/:id/recording` | session | multipart audio (owner-only) |
+| POST | `/api/studna/:id/summary` | session | — (Gemini Pro nad všemi recordings) |
+| PATCH | `/api/studna/recordings/:id` | session | `{isPinned}` |
+| DELETE | `/api/studna/recordings/:id` | session | — |
+| GET | `/api/studna/recordings/:id/audio` | session | — (stream MP3/WebM pro přehrávač) |
+| GET | `/api/studna/:id/onboarding/:guestId/standard.pdf` | session | — (onboarding PDF pro běžné contributory) |
+| GET | `/api/studna/:id/onboarding/:guestId/brief.pdf` | session | — (onboarding PDF pro brief contributory) |
+| GET | `/api/me/:token` | **public** | seznam projektů hosta |
+| POST | `/api/me/:token/recording` | **public** | multipart audio (rate-limit 20/h/host) |
+
 ### Cron
 | Method | Path | Auth | Query |
 |---|---|---|---|
 | POST | `/api/cron/monthly-health-report` | **x-cron-key** | `?from&to` (override; jinak předchozí celý měsíc) |
+| POST | `/api/cron/daily-projects-digest` | **x-cron-key** | `?date=YYYY-MM-DD` (override; jinak dnes) |
+| POST | `/api/cron/cleanup-audio` | **x-cron-key** | — (smaže STANDARD audio >14d, pokud není pinned) |
 
 ### AI
 | Method | Path | Auth | Body |

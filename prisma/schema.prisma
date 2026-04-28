@@ -32,6 +32,8 @@ model User {
   letterSenders LetterSender[]
   letterRecipients LetterRecipient[]
   letters       Letter[]
+  projectBoxes  ProjectBox[]
+  guestUsers    GuestUser[]
 }
 
 model WebauthnCredential {
@@ -475,4 +477,145 @@ model Letter {
 
   @@index([userId, createdAt])
   @@index([senderId])
+}
+
+// ---- Studna: sdílené projektové boxíky s hlasovými záznamy ----
+
+model ProjectBox {
+  id                String   @id @default(cuid())
+  userId            String   // owner (single-user systém = Petr)
+  user              User     @relation(fields: [userId], references: [id])
+
+  name              String   // "ART76 brainstorm"
+  homeTitle         String?  // pod ikonou na ploše iPhone, max ~9 znaků
+  description       String?  // kontext pro AI prompt + onboarding PDF
+
+  // AI prompt overrides (pokud null, použije se default v lib/audio-transcribe.ts)
+  extractionPrompt  String?
+
+  // Notifikace v 18:00 cron — pokud false, projekt se v digestu vynechá
+  includeInDigest   Boolean  @default(true)
+
+  invitations       ProjectInvitation[]
+  recordings        ProjectRecording[]
+  summaries         ProjectSummary[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  archivedAt        DateTime?
+
+  @@index([userId])
+}
+
+model GuestUser {
+  id          String   @id @default(cuid())
+  ownerUserId String   // kdo ho vlastní (Petr)
+  owner       User     @relation(fields: [ownerUserId], references: [id])
+
+  email       String
+  name        String
+  phone       String?
+
+  // Stabilní token v URL /me/<guestToken>. Lze regenerovat — invaliduje
+  // všechny dříve sdílené odkazy.
+  guestToken  String   @unique
+
+  invitations ProjectInvitation[]
+  recordings  ProjectRecording[]
+
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime?
+
+  // Jeden Karel per Petr (matching podle emailu).
+  @@unique([ownerUserId, email])
+  @@index([ownerUserId])
+}
+
+model ProjectInvitation {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         ProjectBox @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  guestUserId     String
+  guestUser       GuestUser  @relation(fields: [guestUserId], references: [id], onDelete: Cascade)
+
+  // Per-projekt permission — některý host má brief permission jinde, jinde ne.
+  canRecordBrief  Boolean  @default(false)
+
+  invitedAt       DateTime @default(now())
+
+  @@unique([projectId, guestUserId])
+  @@index([guestUserId])
+}
+
+model ProjectRecording {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         ProjectBox @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Autor. Buď GuestUser, nebo owner (pak guestUserId == null + isOwner == true).
+  guestUserId     String?
+  guestUser       GuestUser? @relation(fields: [guestUserId], references: [id])
+  isOwner         Boolean  @default(false)
+  authorName      String   // snapshot — i kdyby host byl smazán, dopis ví autora
+
+  type            RecordingType @default(STANDARD)
+
+  // Audio storage (relativní k UPLOADS_PATH; null = soubor smazán cleanup cronem)
+  audioPath       String?
+  audioMime       String?
+  audioBytes      Int?
+  audioDurationSec Int?
+
+  // Transkript se zachová vždy
+  transcript      String
+
+  // Strukturovaný rozbor z Gemini (volné JSON pro flexibilitu)
+  // {
+  //   summary: string,
+  //   key_themes: string[],
+  //   thoughts: [{ text, importance, rationale, category }],
+  //   open_questions: string[],
+  //   sentiment: string,
+  //   intensity_signals: string,
+  //   ... (brief navíc: glossary, actors, decision_history)
+  // }
+  analysis        Json?
+
+  // User-driven: zachovat audio i po 14 dnech (jen pro STANDARD; brief se nemaže nikdy)
+  isPinned        Boolean  @default(false)
+
+  // Status zpracování (asynchronní transcribe může selhat)
+  status          String   @default("processing") // processing | processed | error
+  processingError String?
+
+  ip              String?
+  userAgent       String?
+
+  createdAt       DateTime @default(now())
+  archivedAt      DateTime?
+
+  @@index([projectId, createdAt])
+  @@index([guestUserId])
+  @@index([type, createdAt])
+}
+
+enum RecordingType {
+  STANDARD       // < 10 min, Flash, audio mizí za 14 dní (pokud nepinned)
+  BRIEF          // klíčový brief, Pro s deep analýzou, audio se nikdy nemaže
+}
+
+model ProjectSummary {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     ProjectBox @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Markdown výstup z Gemini Pro nad všemi recordings (briefy s vyšší vahou)
+  text        String
+  model       String   // "gemini-2.5-pro"
+  recordingsIncluded Int
+  briefsIncluded     Int
+
+  createdAt   DateTime @default(now())
+
+  @@index([projectId, createdAt])
 }
