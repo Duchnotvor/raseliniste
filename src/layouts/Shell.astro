@@ -68,12 +68,13 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
       data-sidebar-backdrop
     ></div>
 
-    {/* Sidebar — glass panel; lg: v gridu, pod lg: off-canvas */}
+    {/* Sidebar — glass panel; lg: v gridu, pod lg: off-canvas (otevírá se hamburgerem) */}
     <aside
       data-sidebar
       class="glass rounded-xl flex flex-col overflow-hidden
              lg:sticky lg:top-3 lg:h-[calc(100vh-1.5rem)]
              fixed inset-y-2 left-2 w-[260px] z-40 transform -translate-x-[calc(100%+1rem)] transition-transform
+             data-[open]:translate-x-0
              lg:static lg:translate-x-0 lg:inset-auto lg:w-auto"
     >
       <div class="px-5 py-5 border-b border-white/5">

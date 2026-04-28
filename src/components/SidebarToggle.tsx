@@ -9,10 +9,24 @@ import { Button } from "./ui/Button";
 export default function SidebarToggle() {
   const [open, setOpen] = useState(false);
 
+  // Synchronizuje stav s DOM atributy, na které navazuje Tailwind selector
+  // `data-[open]:translate-x-0` v Shell.astro. Třída na <html> nestačila —
+  // hamburger to dělalo, ale sidebar se reálně neposouval.
   useEffect(() => {
     const root = document.documentElement;
-    if (open) root.classList.add("sidebar-open");
-    else root.classList.remove("sidebar-open");
+    const sidebar = document.querySelector("[data-sidebar]");
+    const backdrop = document.querySelector("[data-sidebar-backdrop]");
+    if (open) {
+      root.classList.add("sidebar-open");
+      sidebar?.setAttribute("data-open", "");
+      backdrop?.setAttribute("data-open", "");
+      document.body.style.overflow = "hidden"; // zakázat scroll pozadí
+    } else {
+      root.classList.remove("sidebar-open");
+      sidebar?.removeAttribute("data-open");
+      backdrop?.removeAttribute("data-open");
+      document.body.style.overflow = "";
+    }
   }, [open]);
 
   // Zavřít sidebar na click mimo nebo Escape
