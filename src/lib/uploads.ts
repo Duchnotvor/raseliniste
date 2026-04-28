@@ -28,16 +28,32 @@ export async function ensureUploadDir(subdir: string): Promise<string> {
 
 /**
  * Bezpečné rozšíření z mime typu (whitelist — žádný .exe).
+ * Tolerantní k codec parametrům: "audio/webm; codecs=opus" → "audio/webm"
  */
 function extFromMime(mime: string): string | null {
+  // Strip parametry (codecs=opus, charset=, …)
+  const base = mime.toLowerCase().split(";")[0].trim();
   const map: Record<string, string> = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
     "image/webp": "webp",
     "application/pdf": "pdf",
+    // Audio (Studna)
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/m4a": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/aac": "aac",
+    "audio/flac": "flac",
   };
-  return map[mime.toLowerCase()] ?? null;
+  return map[base] ?? null;
 }
 
 /**
