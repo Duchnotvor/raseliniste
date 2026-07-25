@@ -282,4 +282,30 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
     </div>
   </div>
   <SwUpdateBanner client:load />
+
+  {/* Petr 2026-07-24: v iOS PWA se externí odkazy (Page Links v sidebaru,
+      PDF, cokoli) otvíraly v in-app Safari sheetu. Globální zachytávač:
+      klik na externí https odkaz → x-safari-https:// scheme (iOS 17+)
+      = otevře skutečné Safari. Capture fáze předběhne i React onClick
+      handlery. Mimo iOS standalone se nic nemění. */}
+  <script>
+    const iosPwa =
+      /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+      ((navigator as { standalone?: boolean }).standalone === true ||
+        matchMedia("(display-mode: standalone)").matches);
+    if (iosPwa) {
+      document.addEventListener(
+        "click",
+        (e) => {
+          const target = e.target as Element | null;
+          const a = target?.closest?.('a[href^="https://"]') as HTMLAnchorElement | null;
+          if (!a || a.host === location.host) return;
+          e.preventDefault();
+          e.stopPropagation();
+          location.href = "x-safari-https://" + a.href.slice("https://".length);
+        },
+        true,
+      );
+    }
+  </script>
 </Base>
