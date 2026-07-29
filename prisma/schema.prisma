@@ -50,6 +50,7 @@ model User {
   tasks            Task[]
   planningDayTemplates PlanningDayTemplate[]
   planningSettings     PlanningSettings?
+  planningBlocks       PlanningBlock[]
   taskAudioBatches TaskAudioBatch[]
   journalEntries   JournalEntry[]
   ragChunks        RagChunk[]
@@ -1158,6 +1159,22 @@ model PlanningSettings {
   digestEnabled   Boolean  @default(false)
   digestContactId String?  // Contact (isTeam) — příjemce denního digestu
   digestContact   Contact? @relation(fields: [digestContactId], references: [id])
+}
+
+// Klientský blok na plánovacím boardu (Petr 2026-07-24) — kontejner
+// time-blocking: na den se přetáhne CELÝ klient/projekt ("AVECOMP"),
+// ne jednotlivé úkoly. Úkoly klienta se v bloku ukazují automaticky.
+model PlanningBlock {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime // den bloku (půlnoc lokálně)
+  clientKey String   // slug klienta (stejný jako grupování na boardu)
+  label     String   // zobrazovaný název ("AVECOMP", "Svěrák")
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date, clientKey])
+  @@index([userId, date])
 }
 
 // Šablona týdne — theme days (Petr 2026-07-22, ADHD F3).

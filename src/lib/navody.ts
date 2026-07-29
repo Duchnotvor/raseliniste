@@ -119,11 +119,13 @@ rozhoduje **plánovaný den výroby** (kdy to budu dělat, pole \`plannedFor\`).
       `,
       jak_to_ovladam: `
 **Board (\`/planovani\`):**
-- Vlevo **Backlog** = otevřené nenaplánované úkoly (řazené podle priority a termínu, hledání nahoře)
-- **Přetáhni kartu na den**, kdy ji budeš dělat. Na mobilu místo tahání použij výběr „→ den" na kartě.
-- **Max 3 úkoly na den** — víc = červené počítadlo a varování. To je WIP limit, ne dekorace.
+- Vlevo **K naplánování** = jen aktuální úkoly (termín do 14 dnů / vysoká priorita), **seskupené po klientech**. Zbytek žije v Todoistu.
+- **Přetáhni na den CELÉHO KLIENTA** (hlavičku skupiny) → vznikne **blok** — den vyhrazený tomu klientovi; jeho aktuální úkoly se v bloku ukazují samy. × blok zruší, tažením ho přesuneš.
+- Nebo přetáhni jednotlivou kartu úkolu. Na mobilu použij výběr „→ den" na kartě.
+- **Max 3 položky na den** (bloky + úkoly) — víc = červené počítadlo. To je WIP limit, ne dekorace.
+- V hlavičce dne vidíš **schůzky s časy** z kalendáře — plánuješ kolem nich.
 - Fajfka na kartě = hotovo. Šipky ‹ › nahoře = jiný týden.
-- Nedodělané úkoly z minulých týdnů se vrací nahoru do backlogu s korálovým „nedokončeno z minula".
+- Nedodělané úkoly z minulých týdnů se vrací nahoru s korálovým „nedokončeno z minula".
 
 **AI weekly review (neděle večer, 30 minut):**
 - V neděli 18:30 přijde push „Nedělní plánování týdne".

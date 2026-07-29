@@ -121,6 +121,15 @@ const [weekTasks, overdueTasks, candidateTasks, candidateTotal] = await Promise.
   prisma.task.count({ where: candidateWhere }),
 ]);
 
+// Klientské bloky týdne (kontejnery)
+const weekBlocks = await prisma.planningBlock.findMany({
+  where: { userId: session.uid, date: { gte: monday, lt: nextMonday } },
+  select: { id: true, date: true, clientKey: true, label: true },
+});
+const initialBlocks = weekBlocks.map((b) => ({
+  id: b.id, date: dkey(b.date), clientKey: b.clientKey, label: b.label,
+}));
+
 const projects = await prisma.todoistProjectMirror.findMany({
   where: { userId: session.uid },
   select: { todoistId: true, name: true },
@@ -175,8 +184,8 @@ const currentMondayKey = dkey(new Date(new Date().setDate(new Date().getDate() -
       <div>
         <h1 class="font-serif text-[2.25rem] leading-tight">Plánování týdne</h1>
         <p class="text-sm text-muted-foreground mt-1">
-          Vlevo úkoly, které jsou aktuální (termín do 14 dnů nebo vysoká priorita), seskupené po klientech.
-          Přetáhni je na den, kdy je budeš dělat. Max 3 na den.
+          Přetáhni na den <strong>celého klienta</strong> (hlavičku skupiny) = blok s jeho úkoly,
+          nebo jednotlivé úkoly. Vlevo jen aktuální věci (termín do 14 dnů / vysoká priorita). Max 3 na den.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -205,6 +214,7 @@ const currentMondayKey = dkey(new Date(new Date().setDate(new Date().getDate() -
         weekStart={dkey(monday)}
         days={days}
         initialCards={initialCards}
+        initialBlocks={initialBlocks}
         backlogTotal={candidateTotal}
       />
     </div>

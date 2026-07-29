@@ -27,7 +27,15 @@ export async function buildKolegyneDigest(userId: string, digestContactId: strin
   const dayAfter = new Date(today); dayAfter.setDate(dayAfter.getDate() + 2);
   const weekAhead = new Date(today); weekAhead.setDate(weekAhead.getDate() + 7);
 
-  const [plannedToday, plannedTomorrow, meetingsToday, forColleague, projects] = await Promise.all([
+  const [blocksToday, blocksTomorrow, plannedToday, plannedTomorrow, meetingsToday, forColleague, projects] = await Promise.all([
+    prisma.planningBlock.findMany({
+      where: { userId, date: { gte: today, lt: tomorrow } },
+      select: { label: true },
+    }),
+    prisma.planningBlock.findMany({
+      where: { userId, date: { gte: tomorrow, lt: dayAfter } },
+      select: { label: true },
+    }),
     prisma.task.findMany({
       where: { userId, status: "open", plannedFor: { gte: today, lt: tomorrow } },
       select: { title: true, todoistProjectId: true, priority: true },
@@ -74,9 +82,15 @@ export async function buildKolegyneDigest(userId: string, digestContactId: strin
   const dateLabel = today.toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "numeric" });
 
   const sections: { title: string; lines: string[] }[] = [
-    { title: "Petr dnes dělá", lines: plannedToday.map(taskLine) },
+    {
+      title: "Petr dnes dělá",
+      lines: [...blocksToday.map((b) => `BLOK: ${b.label} (celý klient)`), ...plannedToday.map(taskLine)],
+    },
     { title: "Dnešní schůzky", lines: meetingsToday.map((m) => `${fmtT(m.startsAt)}–${fmtT(m.endsAt)} ${m.title}`) },
-    { title: "Zítra v plánu", lines: plannedTomorrow.map(taskLine) },
+    {
+      title: "Zítra v plánu",
+      lines: [...blocksTomorrow.map((b) => `BLOK: ${b.label} (celý klient)`), ...plannedTomorrow.map(taskLine)],
+    },
     { title: "Připrav prosím / tvoje úkoly", lines: forColleague.map(taskLine) },
   ].filter((s) => s.lines.length > 0);
 

@@ -34,8 +34,9 @@ Todoist zůstává primární nástroj — všechno se tam obousměrně synchron
 
 ### Board
 
-- **Vlevo Backlog** — všechny otevřené nenaplánované úkoly, seřazené podle priority a termínu. Nahoře hledání.
-- **Sloupce Po–Ne** — přetáhni kartu na den, **kdy to budeš dělat**. Na mobilu použij výběr „→ den" na kartě.
+- **Vlevo „K naplánování"** — jen aktuální úkoly (termín do 14 dnů nebo vysoká priorita), **seskupené po klientech**. Nahoře hledání. Zbytek backlogu žije dál v Todoistu.
+- **Klientský blok (hlavní způsob!)** — přetáhni na den **hlavičku celého klienta** (AVECOMP, Svěrák…). Vznikne barevný blok = den vyhrazený tomu klientovi; jeho aktuální úkoly se v bloku vypisují automaticky. Křížkem blok zrušíš, tažením přesuneš na jiný den.
+- **Dny jako řádky** — přetáhni blok nebo kartu na den, **kdy to budeš dělat**. Na mobilu použij výběr „→ den" na kartě. V hlavičce dne vidíš schůzky s časy.
 - **Max 3 úkoly na den.** Víc = červené počítadlo + varování. To není dekorace — WIP limit tě fyzicky nutí dokončovat, ne rozdělávat.
 - **Fajfka** na kartě = hotovo (propíše se do Todoistu).
 - **Šipky ‹ ›** = jiný týden; „dnes" tě vrátí na aktuální.

@@ -35,14 +35,34 @@ export interface DayInfo {
   busyHours: number;
 }
 
+export interface PlanBlock {
+  id: string;
+  date: string;      // YYYY-MM-DD
+  clientKey: string;
+  label: string;
+}
+
 interface Props {
   weekStart: string;
   days: DayInfo[];
   initialCards: PlanCard[];
+  initialBlocks: PlanBlock[];
   backlogTotal: number;
 }
 
 const WIP_LIMIT = 3;
+
+/** Slug klienta — musí být stabilní (unikátnost bloku per den+klient) */
+function clientKeyOf(label: string): string {
+  return label.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+const BLOCK_TINTS = ["peach", "sky", "mint", "lavender", "sage", "butter", "rose", "pink"];
+function tintFor(label: string): string {
+  let h = 0;
+  for (const ch of label) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  return BLOCK_TINTS[h % BLOCK_TINTS.length];
+}
 
 function priorityDot(p: PlanCard["priority"]): string {
   if (p === "high") return "var(--c-signal)";
@@ -50,9 +70,12 @@ function priorityDot(p: PlanCard["priority"]): string {
   return "var(--muted-foreground)";
 }
 
-export default function PlanningBoard({ weekStart, days, initialCards, backlogTotal }: Props) {
+export default function PlanningBoard({ weekStart, days, initialCards, initialBlocks, backlogTotal }: Props) {
   const [cards, setCards] = useState<PlanCard[]>(initialCards);
+  const [blocks, setBlocks] = useState<PlanBlock[]>(initialBlocks);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [dragGroup, setDragGroup] = useState<string | null>(null);   // label skupiny klienta
+  const [dragBlockId, setDragBlockId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +188,43 @@ export default function PlanningBoard({ weekStart, days, initialCards, backlogTo
     }
   }
 
+  async function createBlock(label: string, date: string) {
+    const clientKey = clientKeyOf(label);
+    if (blocks.some((b) => b.date === date && b.clientKey === clientKey)) return;
+    const tempId = `temp-${Date.now()}`;
+    setBlocks((bs) => [...bs, { id: tempId, date, clientKey, label }]);
+    const res = await fetch("/api/planovani/blok", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ date, clientKey, label }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      setBlocks((bs) => bs.filter((b) => b.id !== tempId));
+      setError("Blok se nepodařilo uložit.");
+      return;
+    }
+    const data = await res.json();
+    setBlocks((bs) => bs.map((b) => (b.id === tempId ? { ...b, id: data.block.id } : b)));
+  }
+
+  async function moveBlock(blockId: string, date: string) {
+    const prev = blocks;
+    setBlocks((bs) => bs.map((b) => (b.id === blockId ? { ...b, date } : b)));
+    const res = await fetch("/api/planovani/blok", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: blockId, date }),
+    }).catch(() => null);
+    if (!res || !res.ok) { setBlocks(prev); setError("Přesun bloku se nepovedl."); }
+  }
+
+  async function removeBlock(blockId: string) {
+    const prev = blocks;
+    setBlocks((bs) => bs.filter((b) => b.id !== blockId));
+    const res = await fetch(`/api/planovani/blok?id=${encodeURIComponent(blockId)}`, { method: "DELETE" }).catch(() => null);
+    if (!res || !res.ok) { setBlocks(prev); setError("Smazání bloku se nepovedlo."); }
+  }
+
   async function complete(cardId: string) {
     const prev = cards;
     setCards((cs) => cs.filter((c) => c.id !== cardId));
@@ -233,15 +293,78 @@ export default function PlanningBoard({ weekStart, days, initialCards, backlogTo
     );
   }
 
+  function BlockCard({ b }: { b: PlanBlock }) {
+    const tint = tintFor(b.label);
+    // Úkoly klienta uvnitř bloku — z aktuálních kandidátů (nenaplánované + přeteklé)
+    const blockTasks = cards
+      .filter((c) => (c.plannedFor === null || c.overdue) && clientKeyOf(c.projectName ?? "") === b.clientKey)
+      .sort((a, x) =>
+        ["high", "normal", "low"].indexOf(a.priority) - ["high", "normal", "low"].indexOf(x.priority) ||
+        (a.dueAt ?? "9999").localeCompare(x.dueAt ?? "9999"))
+      .slice(0, 6);
+    return (
+      <div
+        draggable
+        onDragStart={(e) => { setDragBlockId(b.id); e.dataTransfer.effectAllowed = "move"; }}
+        onDragEnd={() => { setDragBlockId(null); setDropTarget(null); }}
+        className={`rounded-lg border-l-4 px-3 py-2 w-full sm:w-72 cursor-grab active:cursor-grabbing ${dragBlockId === b.id ? "opacity-40" : ""}`}
+        style={{
+          borderLeftColor: `var(--tint-${tint})`,
+          background: `color-mix(in oklch, var(--tint-${tint}) 12%, transparent)`,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-sm truncate" style={{ color: `color-mix(in oklch, var(--tint-${tint}) 45%, var(--foreground))` }}>
+            {b.label}
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground">blok</span>
+          <button
+            type="button"
+            onClick={() => removeBlock(b.id)}
+            title="Zrušit blok"
+            className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+        {blockTasks.length > 0 ? (
+          <ul className="mt-1 space-y-0.5">
+            {blockTasks.map((t) => (
+              <li key={t.id} className="flex items-center gap-1.5 text-xs leading-snug">
+                <span className="size-1 rounded-full shrink-0" style={{ background: priorityDot(t.priority) }} />
+                <span className="truncate flex-1 min-w-0">{t.title}</span>
+                {t.dueAt && (
+                  <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                    {new Date(t.dueAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="mt-1 text-[11px] text-muted-foreground italic">žádné aktuální úkoly — volný blok</div>
+        )}
+      </div>
+    );
+  }
+
   function DayRow({ d }: { d: DayInfo }) {
     const cardsIn = byDay.get(d.date) ?? [];
+    const blocksIn = blocks.filter((b) => b.date === d.date);
     const over = dropTarget === d.date;
-    const wipOver = cardsIn.length > WIP_LIMIT;
+    const wipOver = cardsIn.length + blocksIn.length > WIP_LIMIT;
     return (
       <div
         onDragOver={(e) => { e.preventDefault(); setDropTarget(d.date); }}
         onDragLeave={() => setDropTarget((t) => (t === d.date ? null : t))}
-        onDrop={(e) => { e.preventDefault(); if (dragId) move(dragId, d.date); setDropTarget(null); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (dragGroup) createBlock(dragGroup, d.date);
+          else if (dragBlockId) moveBlock(dragBlockId, d.date);
+          else if (dragId) move(dragId, d.date);
+          setDropTarget(null);
+          setDragGroup(null);
+        }}
         className={`rounded-xl border p-3 transition-colors ${
           over ? "border-[var(--tint-sky)] bg-[var(--tint-sky)]/5" : "border-white/10 bg-black/10"
         } ${d.isToday ? "ring-1 ring-[var(--tint-sky)]/50" : ""} ${d.isPast ? "opacity-60" : ""}`}
@@ -276,14 +399,15 @@ export default function PlanningBoard({ weekStart, days, initialCards, backlogTo
             </span>
           )}
           <span className={`ml-auto text-[11px] font-mono ${wipOver ? "text-[color:var(--c-signal)] font-semibold" : "text-muted-foreground"}`}>
-            {cardsIn.length}/{WIP_LIMIT}
+            {cardsIn.length + blocksIn.length}/{WIP_LIMIT}
             {wipOver && <AlertTriangle className="inline size-3 ml-1 -mt-0.5" />}
           </span>
         </div>
-        {cardsIn.length === 0 ? (
-          <div className="text-xs text-muted-foreground/50 italic px-1 py-1.5">přetáhni sem úkol…</div>
+        {cardsIn.length === 0 && blocksIn.length === 0 ? (
+          <div className="text-xs text-muted-foreground/50 italic px-1 py-1.5">přetáhni sem klienta nebo úkol…</div>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 items-start">
+            {blocksIn.map((b) => <BlockCard key={b.id} b={b} />)}
             {cardsIn.map((c) => <Card key={c.id} c={c} compact />)}
           </div>
         )}
@@ -381,15 +505,23 @@ export default function PlanningBoard({ weekStart, days, initialCards, backlogTo
           )}
           {backlogGroups.groups.map(([name, groupCards]) => {
             const open = openGroups.has(name) || filter.length > 0;
+            const gTint = tintFor(name);
             return (
               <div key={name}>
+                {/* Celý klient se dá přetáhnout na den = klientský BLOK */}
                 <button
                   type="button"
+                  draggable
+                  onDragStart={(e) => { setDragGroup(name); e.dataTransfer.effectAllowed = "copy"; }}
+                  onDragEnd={() => { setDragGroup(null); setDropTarget(null); }}
                   onClick={() => toggleGroup(name)}
-                  className="w-full flex items-center gap-1.5 px-1 py-1 text-sm rounded-md hover:bg-white/5 text-left"
+                  title="Klik = rozbalit · přetáhni na den = blok pro celého klienta"
+                  className={`w-full flex items-center gap-1.5 px-1 py-1 text-sm rounded-md hover:bg-white/5 text-left cursor-grab active:cursor-grabbing border-l-2 ${dragGroup === name ? "opacity-40" : ""}`}
+                  style={{ borderLeftColor: `var(--tint-${gTint})` }}
                 >
                   {open ? <ChevronDown className="size-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />}
                   <span className="flex-1 min-w-0 truncate font-medium">{name}</span>
+                  <GripVertical className="size-3.5 text-muted-foreground/40 shrink-0" />
                   <span className="text-[11px] font-mono text-muted-foreground">{groupCards.length}</span>
                 </button>
                 {open && (
