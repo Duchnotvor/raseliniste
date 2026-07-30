@@ -66,7 +66,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
       ...(input.excludeEventId ? { id: { not: input.excludeEventId } } : {}),
     },
     select: {
-      id: true, type: true, startsAt: true, endsAt: true, source: true, title: true,
+      id: true, type: true, startsAt: true, endsAt: true, source: true, title: true, allDay: true,
     },
   });
 
@@ -104,6 +104,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
         endsAt,
         source: "GOOGLE_PRIMARY" as typeof calendarEvents[number]["source"],
         title: b.inviteeName ? `Booking — ${b.inviteeName}` : "Booking (rezervováno)",
+        allDay: false,
       };
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -148,11 +149,21 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
       "PARTNER_SHIFT",
       "PARTNER_VACATION",
     ]);
+    let allDaySoft: string | null = null;
     for (const e of sameWindow) {
       if (NON_BLOCKING.has(e.type)) continue;
       // OOO_TRAVEL_WORKING blokuje jen prezenční, online ne (řeší HARD_OOO_TRAVEL_INPERSON výše)
       if (e.type === "OOO_TRAVEL_WORKING" && input.type === "MEETING_ONLINE") continue;
       if (!overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) continue;
+      // FIX 2026-07-30 (Gideon: pozvánky bez termínů): CELODENNÍ události
+      // (DOMA, TREB, narozeniny, synův camp…) jsou markery, ne obsazený čas —
+      // hodinový slot tvrdě NEblokují. Jen WARNING (v quickadd viditelný;
+      // booking nabídku nefiltruje). Dovolená (OOO_*) a hokej mají vlastní
+      // tvrdá pravidla výše a blokují dál. Časované události blokují dál.
+      if (e.allDay && e.type !== "OOO_FULL" && e.type !== "HOCKEY_SON") {
+        if (!allDaySoft) allDaySoft = e.title;
+        continue;
+      }
       // Skip když už existuje specifický signál pro tenhle event (HOCKEY/OOO_FULL výše)
       const alreadyFlagged =
         signals.some((s) =>
@@ -167,6 +178,13 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
         message: `V kalendáři už máš „${e.title}" (${fmtTime(e.startsAt)}–${fmtTime(e.endsAt)}).`,
       });
       break;
+    }
+    if (allDaySoft && !signals.some((s) => s.severity === "ERROR")) {
+      signals.push({
+        rule: "SOFT_ALLDAY_OVERLAP",
+        severity: "WARNING",
+        message: `Ten den máš celodenní „${allDaySoft}" — slot neblokuje, jen připomínám.`,
+      });
     }
   }
 
@@ -500,7 +518,9 @@ export async function listAvailableSlots(opts: AvailabilityOpts): Promise<Slot[]
         // vodítko pro Gideona — veřejnou nabídku termínů NESMÍ vyřazovat.
         // S šablonou „Út/St/Čt maker" jinak zmizely skoro všechny sloty
         // a pozvánky neměly co nabídnout.
-        const bookingSignals = result.signals.filter((sig) => sig.rule !== "SOFT_THEME_DAY");
+        // SOFT_* pravidla jsou interní vodítka pro Gideona (šablona týdne,
+        // celodenní markery) — veřejnou nabídku termínů nevyřazují.
+        const bookingSignals = result.signals.filter((sig) => !sig.rule.startsWith("SOFT_"));
         if (aggregate(bookingSignals) === "GREEN") {
           slots.push({ startsAt: new Date(s), endsAt: new Date(e), type });
         }
