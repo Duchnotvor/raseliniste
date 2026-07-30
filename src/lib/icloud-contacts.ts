@@ -35,6 +35,7 @@ export interface SyncStats {
   updated: number;         // existující napárovaný + obohacen
   matched: number;         // existujicí matched podle phone/email
   groups: number;          // počet zpracovaných skupin
+  skippedUnchanged?: number; // etag beze změny → replace přeskočen (FIX 2026-07-31)
   errors: number;
   durationMs: number;
   error?: string;
@@ -316,6 +317,20 @@ async function upsertContact(
   };
 
   if (existing) {
+    // FIX 2026-07-31 (Gideon: mail u kontaktu 5× zmizel): pokud se vCard na
+    // iCloudu NEZMĚNILA (stejný etag), přeskočit replace — jinak pull každých
+    // 30 min přepsal lokální editace core polí (e-maily/telefony), které
+    // ještě nedoputovaly do iCloudu. Změněný etag = na iCloudu se editovalo
+    // → iCloud je primárka a replace proběhne normálně.
+    if (existing.icloudUid && existing.icloudUid === parsed.uid && existing.icloudEtag === etag) {
+      await prisma.contact.update({
+        where: { id: existing.id },
+        data: { lastIcloudSyncAt: new Date(), icloudHref: href },
+      });
+      stats.skippedUnchanged = (stats.skippedUnchanged ?? 0) + 1;
+      return;
+    }
+
     // Bezpečnost: pokud má kontakt už icloudUid (re-sync), iCloud je
     // primárka — replace phones/emails. Jinak (prvni match z manual/Things)
     // **union** — zachovat lokální + přidat iCloud (nezmizí VIPka lookup

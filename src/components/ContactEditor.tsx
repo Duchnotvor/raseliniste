@@ -138,6 +138,12 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
         setError(data.error ?? "Uložení selhalo.");
         return;
       }
+      // FIX 2026-07-31: uloženo lokálně, ale push do iCloudu selhal —
+      // NEZAVÍRAT mlčky (iCloud pull by změnu později přepsal).
+      if (data.icloudPush && !data.icloudPush.ok) {
+        setError(`Uloženo v Rašeliništi, ale push do iCloudu selhal: ${data.icloudPush.error ?? "?"} — zkus Uložit znovu, jinak změnu při syncu přepíše iCloud.`);
+        return;
+      }
       onClose(true);
     } finally {
       setSaving(false);

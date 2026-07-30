@@ -129,7 +129,28 @@ export const PATCH: APIRoute = async ({ request, cookies, params }) => {
     where: { id },
     include: { phones: true, emails: true },
   });
-  return Response.json({ contact: fresh });
+
+  // FIX 2026-07-31 (Gideon: „5× jsem dal mail a neuložil se"): editor ukládal
+  // core pole (emaily/telefony/jméno) jen lokálně — iCloud pull à 30 min je
+  // pak PŘEPSAL zpátky z vCardy. Po změně core polí proto hned pushujeme
+  // do iCloudu (u spárovaných kontaktů). Selhání pushe uložení neshodí,
+  // ale vrátí se v response, ať to UI ukáže.
+  const coreChanged =
+    body.phones !== undefined || body.emails !== undefined ||
+    body.displayName !== undefined || body.firstName !== undefined ||
+    body.lastName !== undefined || body.note !== undefined ||
+    body.birthMonth !== undefined || body.birthDay !== undefined;
+  let icloudPush: { ok: boolean; error?: string } | null = null;
+  if (coreChanged && fresh?.icloudUid) {
+    const { pushContactToIcloud } = await import("@/lib/icloud-contacts");
+    icloudPush = await pushContactToIcloud(session.uid, id).catch((e) => ({
+      ok: false as const,
+      error: e instanceof Error ? e.message : String(e),
+    }));
+    if (!icloudPush.ok) console.warn(`[contacts] auto-push do iCloudu selhal (${id}):`, icloudPush.error);
+  }
+
+  return Response.json({ contact: fresh, icloudPush });
 };
 
 export const DELETE: APIRoute = async ({ cookies, params }) => {
