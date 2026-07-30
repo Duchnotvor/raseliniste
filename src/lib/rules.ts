@@ -495,8 +495,13 @@ export async function listAvailableSlots(opts: AvailabilityOpts): Promise<Slot[]
           bookingMode: opts.bookingMode,
         });
 
-        // Pro booking nabídneme jen GREEN
-        if (result.verdict === "GREEN") {
+        // Pro booking nabídneme jen GREEN.
+        // FIX 2026-07-24: SOFT_THEME_DAY (šablona týdne, F3) je interní
+        // vodítko pro Gideona — veřejnou nabídku termínů NESMÍ vyřazovat.
+        // S šablonou „Út/St/Čt maker" jinak zmizely skoro všechny sloty
+        // a pozvánky neměly co nabídnout.
+        const bookingSignals = result.signals.filter((sig) => sig.rule !== "SOFT_THEME_DAY");
+        if (aggregate(bookingSignals) === "GREEN") {
           slots.push({ startsAt: new Date(s), endsAt: new Date(e), type });
         }
       }
