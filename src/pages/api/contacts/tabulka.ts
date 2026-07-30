@@ -250,7 +250,30 @@ export const PATCH: APIRoute = async ({ cookies, request }) => {
         }
       }
 
-      results.push({ id: contactId, ok: true });
+      // FIX 2026-07-31 (stejná past jako ✎ editor): tabulka ukládala core
+      // pole jen lokálně → iCloud pull je přepsal. Po změně core polí
+      // auto-push do iCloudu (jen spárované kontakty). Selhání pushe
+      // neshodí uložení — vrátí se v results ať ho UI ukáže.
+      const CORE_FIELDS = new Set([
+        "displayName", "firstName", "lastName", "company", "note",
+        "birthYear", "birthMonth", "birthDay",
+        "phone1", "phone2", "phone3", "email1", "email2", "address", "groups",
+      ]);
+      const coreChanged = changes.some((c) => CORE_FIELDS.has(c.field));
+      let pushError: string | undefined;
+      if (coreChanged && contact.icloudUid) {
+        const { pushContactToIcloud } = await import("@/lib/icloud-contacts");
+        const push = await pushContactToIcloud(session.uid, contactId).catch((e) => ({
+          ok: false as const,
+          error: e instanceof Error ? e.message : String(e),
+        }));
+        if (!push.ok) {
+          pushError = `iCloud push selhal: ${push.error ?? "?"}`;
+          console.warn(`[tabulka] auto-push do iCloudu selhal (${contactId}):`, push.error);
+        }
+      }
+
+      results.push({ id: contactId, ok: true, error: pushError });
     } catch (e) {
       results.push({ id: contactId, ok: false, error: e instanceof Error ? e.message : String(e) });
     }
