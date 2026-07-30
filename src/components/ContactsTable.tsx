@@ -260,9 +260,15 @@ export default function ContactsTable({ initialTotal, icloudStatus, googleStatus
         setError(data.error ?? "Uložení selhalo.");
         return;
       }
-      const failed = (data.results as Array<{ ok: boolean; error?: string }>).filter((r) => !r.ok);
+      const results = data.results as Array<{ ok: boolean; error?: string }>;
+      const failed = results.filter((r) => !r.ok);
+      // FIX 2026-07-31: ok=true + error = uloženo lokálně, ale iCloud push
+      // selhal — bez zobrazení by změnu později tiše přepsal sync.
+      const pushWarnings = results.filter((r) => r.ok && r.error);
       if (failed.length > 0) {
         setError(`${failed.length} změn selhalo: ${failed.map((f) => f.error).join("; ")}`);
+      } else if (pushWarnings.length > 0) {
+        setError(`Uloženo, ale ${pushWarnings.length}× selhal zápis do iCloudu (${pushWarnings[0].error}) — zkus Uložit znovu, jinak změnu přepíše sync.`);
       } else {
         setMessage(`Uloženo ${changes.length} změn.`);
         setTimeout(() => setMessage(null), 3000);
