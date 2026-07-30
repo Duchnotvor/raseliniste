@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Plus, Trash2, Check, Loader2, Sparkles, AlertTriangle, Info, XCircle,
   ChevronLeft, ChevronRight, Calendar as CalIcon, MapPin, Clock, RotateCw,
-  StickyNote,
+  StickyNote, Shield, ShieldOff,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -20,6 +20,7 @@ interface CalendarEvent {
   prepNote: string | null;
   itemsToBring: unknown;
   allDay: boolean;
+  blocksBooking?: boolean | null;
 }
 interface DayNote {
   id: string;
@@ -469,6 +470,27 @@ function EventRow({ event }: { event: CalendarEvent }) {
     }
   }
 
+  // Petr 2026-07-30: ruční override blokování booking slotů (3 stavy:
+  // auto → neblokuje → blokuje → auto). Jen reálné události (ne rituály).
+  const [blocks, setBlocks] = useState<boolean | null | undefined>(event.blocksBooking);
+  const [blocksBusy, setBlocksBusy] = useState(false);
+  const isReal = event.source !== "RITUAL" && event.source !== "ANNIVERSARY";
+  async function cycleBlocks() {
+    const next = blocks === null || blocks === undefined ? false : blocks === false ? true : null;
+    setBlocksBusy(true);
+    try {
+      const res = await fetch(`/api/calendar/events/${event.id}/blocking`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ blocks: next }),
+      });
+      if (res.ok) setBlocks(next);
+    } finally {
+      setBlocksBusy(false);
+    }
+  }
+  const blocksLabel = blocks === false ? "neblokuje" : blocks === true ? "blokuje" : "auto";
+
   if (hidden) return null;
 
   return (
@@ -491,6 +513,23 @@ function EventRow({ event }: { event: CalendarEvent }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={`text-xs font-mono ${tint}`}>{label}</span>
+          {isReal && (
+            <button
+              onClick={cycleBlocks}
+              disabled={blocksBusy}
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors disabled:opacity-50 ${
+                blocks === false
+                  ? "border-[var(--tint-sage)]/50 text-[var(--tint-sage)]"
+                  : blocks === true
+                    ? "border-[color:var(--c-signal)]/50 text-[color:var(--c-signal)]"
+                    : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+              title="Blokuje tahle událost termíny v pozvánkách? Klik přepíná: auto → neblokuje → blokuje"
+            >
+              {blocks === false ? <ShieldOff className="size-3" /> : <Shield className="size-3" />}
+              {blocksLabel}
+            </button>
+          )}
           <button
             onClick={hideEvent}
             disabled={hiding}

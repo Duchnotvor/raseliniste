@@ -66,7 +66,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
       ...(input.excludeEventId ? { id: { not: input.excludeEventId } } : {}),
     },
     select: {
-      id: true, type: true, startsAt: true, endsAt: true, source: true, title: true, allDay: true,
+      id: true, type: true, startsAt: true, endsAt: true, source: true, title: true, allDay: true, blocksBooking: true,
     },
   });
 
@@ -105,6 +105,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
         source: "GOOGLE_PRIMARY" as typeof calendarEvents[number]["source"],
         title: b.inviteeName ? `Booking — ${b.inviteeName}` : "Booking (rezervováno)",
         allDay: false,
+        blocksBooking: true,
       };
     })
     .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -119,7 +120,9 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
   // ---- HARD pravidla (ERROR) ----
 
   // HARD_HOCKEY_BLOCK: překryv s HOCKEY_SON
+  // (blocksBooking=false = ruční „nemusím tam být" — např. soustředění pryč)
   for (const e of sameWindow) {
+    if (e.blocksBooking === false) continue;
     if (e.type === "HOCKEY_SON" && overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) {
       signals.push({
         rule: "HARD_HOCKEY_BLOCK",
@@ -149,18 +152,34 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
       "PARTNER_SHIFT",
       "PARTNER_VACATION",
     ]);
+    // Události ze synova kalendáře, kde Gideon NEmusí být (default) —
+    // blokuje jen doprovod: lékař apod. dle názvu, nebo ruční override.
+    const SON_ESCORT_RE = /l[ée]ka[řr]|doktor|zuba[řr]|ordinac|vy[šs]et[řr]|o[čc]kov|pohotovost|logoped|ortodon/i;
     let allDaySoft: string | null = null;
     for (const e of sameWindow) {
-      if (NON_BLOCKING.has(e.type)) continue;
+      // Ruční override má vždy přednost (Petr 2026-07-30)
+      if (e.blocksBooking === false) {
+        if (!allDaySoft) allDaySoft = e.title;
+        continue;
+      }
+      const forced = e.blocksBooking === true;
+      if (!forced && NON_BLOCKING.has(e.type)) continue;
       // OOO_TRAVEL_WORKING blokuje jen prezenční, online ne (řeší HARD_OOO_TRAVEL_INPERSON výše)
-      if (e.type === "OOO_TRAVEL_WORKING" && input.type === "MEETING_ONLINE") continue;
+      if (!forced && e.type === "OOO_TRAVEL_WORKING" && input.type === "MEETING_ONLINE") continue;
       if (!overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) continue;
+      // Petr 2026-07-30: Matějův program (ICLOUD_SON) je INFO — u většiny
+      // nemusí být (camp, škola). Blokuje jen doprovod dle klíčových slov
+      // (lékař…) nebo ruční override. Hokej řeší HARD_HOCKEY_BLOCK výše.
+      if (!forced && e.source === "ICLOUD_SON" && e.type !== "HOCKEY_SON" && e.type !== "OOO_FULL" && !SON_ESCORT_RE.test(e.title)) {
+        if (!allDaySoft) allDaySoft = `Matěj: ${e.title}`;
+        continue;
+      }
       // FIX 2026-07-30 (Gideon: pozvánky bez termínů): CELODENNÍ události
-      // (DOMA, TREB, narozeniny, synův camp…) jsou markery, ne obsazený čas —
+      // (DOMA, TREB, narozeniny…) jsou markery, ne obsazený čas —
       // hodinový slot tvrdě NEblokují. Jen WARNING (v quickadd viditelný;
       // booking nabídku nefiltruje). Dovolená (OOO_*) a hokej mají vlastní
       // tvrdá pravidla výše a blokují dál. Časované události blokují dál.
-      if (e.allDay && e.type !== "OOO_FULL" && e.type !== "HOCKEY_SON") {
+      if (!forced && e.allDay && e.type !== "OOO_FULL" && e.type !== "HOCKEY_SON") {
         if (!allDaySoft) allDaySoft = e.title;
         continue;
       }
@@ -183,13 +202,14 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
       signals.push({
         rule: "SOFT_ALLDAY_OVERLAP",
         severity: "WARNING",
-        message: `Ten den máš celodenní „${allDaySoft}" — slot neblokuje, jen připomínám.`,
+        message: `Ten den je „${allDaySoft}" — slot neblokuje, jen připomínám.`,
       });
     }
   }
 
   // HARD_OOO_FULL: během Petrovy dovolené
   for (const e of sameWindow) {
+    if (e.blocksBooking === false) continue;
     if (e.type === "OOO_FULL" && overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) {
       signals.push({
         rule: "HARD_OOO_FULL",

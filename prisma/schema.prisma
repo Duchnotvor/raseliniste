@@ -1223,6 +1223,10 @@ model CalendarEvent {
   timezone        String          @default("Europe/Prague")
 
   // Per-event metadata jen v Rašeliništi (ne v Google)
+  // Petr 2026-07-30: ruční override blokování booking slotů.
+  // null = automatika (syn info nebloku­je kromě lékaře, celodenní soft…),
+  // true = vždy blokuje, false = nikdy neblokuje.
+  blocksBooking   Boolean?
   prepNote        String?
   itemsToBring    Json?           // [{name: "knížky", forPerson: "Franta"}, ...]
   manualOverride  Boolean         @default(false)  // commit přes /quickadd 'přesto zapsat'
