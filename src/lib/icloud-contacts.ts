@@ -188,10 +188,19 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
     // rotace, ale duplicitní karta na iCloudu. Krádež způsobovala flip-flop:
     // každý pull přepároval kontakt mezi kartami a REPLACE mu smazal lokální
     // editace (matched≈25 + updated≈25 každý běh v produkci).
-    const liveUids = new Set<string>();
-    for (const { parsed } of contacts) {
-      if (parsed.uid) liveUids.add(parsed.uid);
+    //
+    // Pokud se část karet nepodařilo stáhnout/naparsovat, je liveUids
+    // NEÚPLNÉ → chybějící karta by vypadala jako mrtvý UID a její kontakt
+    // by šel ukrást. V tom případě liveUids = null = "nevíme" a steal
+    // spárovaných kontaktů se tento běh úplně zakáže (rozhodne příští pull).
+    const parsedCount = contacts.length + groups.length;
+    const pullIncomplete = parsedCount < items.length;
+    if (pullIncomplete) {
+      console.warn(`[icloud-sync] neúplný pull: naparsováno ${parsedCount}/${items.length} karet — párování podle telefonu/emailu tento běh vypnuto (ochrana proti únosu kontaktu)`);
     }
+    const liveUids: Set<string> | null = pullIncomplete
+      ? null
+      : new Set(contacts.map((c) => c.parsed.uid).filter((u): u is string => Boolean(u)));
 
     // 1) Upsert kontaktů — match podle telefonu / emailu / icloudUid
     let upsertedCount = 0;
@@ -202,6 +211,7 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
       if (parsed.uid) {
         if (seenUids.has(parsed.uid)) {
           console.warn(`[icloud-sync] duplicitní UID ${parsed.uid} (${parsed.fn ?? "?"}) na více kartách — přeskočeno`);
+          upsertedCount++;
           continue;
         }
         seenUids.add(parsed.uid);
@@ -271,7 +281,7 @@ async function upsertContact(
   href: string,
   etag: string,
   stats: SyncStats,
-  liveUids: Set<string>,
+  liveUids: Set<string> | null,
 ): Promise<void> {
   // 1) Match podle icloudUid (re-sync existujícího)
   let existing = parsed.uid
@@ -319,7 +329,8 @@ async function upsertContact(
       // pullu stále existuje, se NESMÍ ukrást — jeho karta žije, tohle je
       // duplicitní karta na iCloudu (řeší Duplicity UI), ne UID rotace.
       // Krást lze jen unpaired kontakty a kontakty s mrtvým UID (rotace).
-      const stealable = matches.filter((c) => !c.icloudUid || !liveUids.has(c.icloudUid));
+      // liveUids === null = neúplný pull → spárované nekrást vůbec.
+      const stealable = matches.filter((c) => !c.icloudUid || (liveUids !== null && !liveUids.has(c.icloudUid)));
 
       // Preferenční pořadí: unpaired (icloudUid null) → s mrtvým icloudUid (UID rotation)
       existing = stealable.find((c) => !c.icloudUid)
@@ -327,6 +338,13 @@ async function upsertContact(
         ?? null;
       if (existing) stats.matched++;
       else if (matches.length > 0) {
+        if (liveUids === null) {
+          // Neúplný pull: nedokážeme rozhodnout duplicita vs. UID rotace —
+          // kartu tento běh přeskočit (žádný create, žádný steal), rozhodne
+          // se v příštím kompletním pullu.
+          console.warn(`[icloud-sync] karta ${parsed.uid ?? "(bez UID)"} (${parsed.fn ?? "?"}) odložena — neúplný pull, nelze bezpečně párovat`);
+          return;
+        }
         console.warn(
           `[icloud-sync] karta ${parsed.uid ?? "(bez UID)"} (${parsed.fn ?? "?"}) sdílí telefon/email ` +
           `s kontaktem spárovaným na jinou živou kartu — zakládám samostatný kontakt (duplicita na iCloudu, viz /contacts → Duplicity)`,

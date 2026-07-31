@@ -15,6 +15,19 @@
 
 import { prisma } from "./db";
 import { backupContact } from "./contacts-backup";
+import { deleteVCard } from "./carddav";
+import { getIcloudCredentials, getCachedAddressbookUrl } from "./icloud-contacts";
+
+/**
+ * FIX 2026-08-01: cluster s 2+ kontakty spárovanými na ŽIVÉ iCloud karty
+ * nesmí AUTO-merge slučovat — smazání DB řádku kartu na iCloudu nesmaže,
+ * další pull ji naimportuje zpět → nekonečná smyčka create/merge (v produkci
+ * created=7-9 každý běh). Automatika takové clustery přeskakuje; ruční merge
+ * v Duplicity UI je řeší přes deleteIcloudCards (smaže i karty na iCloudu).
+ */
+export function hasIcloudCardConflict(members: Array<{ icloudUid: string | null }>): boolean {
+  return members.filter((m) => m.icloudUid).length >= 2;
+}
 
 export interface DuplicateCluster {
   id: string; // dočasné ID pro UI tracking
@@ -204,7 +217,16 @@ export async function mergeContacts(
   userId: string,
   primaryId: string,
   secondaryIds: string[],
-): Promise<{ ok: boolean; mergedCount: number; error?: string }> {
+  opts?: {
+    /**
+     * FIX 2026-08-01: smazat i karty secondaries na iCloudu. Jen pro RUČNÍ
+     * merge (Duplicity UI) — bez toho další pull smazaný DB řádek vzkřísí
+     * z jeho živé iCloud karty. Automatika tohle NIKDY nezapíná (hromadné
+     * mazání v Apple adresáři bez člověka = příliš riskantní).
+     */
+    deleteIcloudCards?: boolean;
+  },
+): Promise<{ ok: boolean; mergedCount: number; error?: string; icloudDeleted?: number; icloudDeleteErrors?: string[] }> {
   if (secondaryIds.length === 0) return { ok: true, mergedCount: 0 };
 
   const primary = await prisma.contact.findFirst({
@@ -297,5 +319,42 @@ export async function mergeContacts(
   // 5) Smaž secondary
   await prisma.contact.deleteMany({ where: { id: { in: secondaryIds }, userId } });
 
-  return { ok: true, mergedCount: secondaryIds.length };
+  // 6) Volitelně smaž karty secondaries i na iCloudu (jen ruční merge —
+  // jinak je další pull vzkřísí jako nové kontakty). Selhání nevrací error
+  // celého merge: DB část proběhla, jen se karta vrátí příštím pullem.
+  let icloudDeleted = 0;
+  const icloudDeleteErrors: string[] = [];
+  if (opts?.deleteIcloudCards) {
+    // Pozor: primary mohl uid/href PODĚDIT ze secondary (skalární doplnění
+    // výše) — tu kartu mazat nesmíme, teď patří primárnímu kontaktu.
+    const effectivePrimaryUid = (updates.icloudUid as string | undefined) ?? primary.icloudUid;
+    const toDelete = secondaries.filter((s) => s.icloudHref && s.icloudUid && s.icloudUid !== effectivePrimaryUid);
+    if (toDelete.length > 0) {
+      const creds = await getIcloudCredentials(userId);
+      const addressbookUrl = await getCachedAddressbookUrl(userId);
+      if (!creds || !addressbookUrl) {
+        icloudDeleteErrors.push("iCloud credentials/addressbook chybí — karty na iCloudu zůstaly, smaž je na iPhonu.");
+      } else {
+        for (const s of toDelete) {
+          const url = s.icloudHref!.startsWith("http")
+            ? s.icloudHref!
+            : new URL(s.icloudHref!, addressbookUrl).toString();
+          try {
+            await deleteVCard(url, creds, s.icloudEtag);
+            icloudDeleted++;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            icloudDeleteErrors.push(`${s.displayName}: ${msg}`);
+            console.warn(`[merge] smazání iCloud karty ${s.icloudUid} (${s.displayName}) selhalo:`, msg);
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    mergedCount: secondaryIds.length,
+    ...(opts?.deleteIcloudCards ? { icloudDeleted, icloudDeleteErrors } : {}),
+  };
 }

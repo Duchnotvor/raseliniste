@@ -24,7 +24,7 @@
 import type { APIRoute } from "astro";
 import { readSession } from "@/lib/session";
 import { pullIcloudContacts } from "@/lib/icloud-contacts";
-import { findDuplicateClusters, mergeContacts } from "@/lib/contacts-duplicates";
+import { findDuplicateClusters, mergeContacts, hasIcloudCardConflict } from "@/lib/contacts-duplicates";
 import { prisma } from "@/lib/db";
 
 export const prerender = false;
@@ -65,19 +65,34 @@ export const POST: APIRoute = async ({ cookies }) => {
     });
     let processed = 0;
     for (const cluster of clusters) {
-      const sorted = cluster.contacts.slice().sort((a, b) => {
-        const pa = (a.isVip ? 100 : 0) + (a.clientTag ? 30 : 0) + (a.icloudUid ? 10 : 0);
-        const pb = (b.isVip ? 100 : 0) + (b.clientTag ? 30 : 0) + (b.icloudUid ? 10 : 0);
-        if (pa !== pb) return pb - pa;
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      });
-      const primary = sorted[0];
-      const secondaries = sorted.slice(1).map((c) => c.id);
-      if (secondaries.length === 0) continue;
-      const r = await mergeContacts(session.uid, primary.id, secondaries);
-      if (r.ok) {
-        autoMergeStats.merged += r.mergedCount;
-        autoMergeStats.clusters++;
+      try {
+        // FIX 2026-08-01: stejný guard jako v cronu — 2+ kontakty spárované
+        // na živé iCloud karty NEslučovat automaticky (delete DB řádku kartu
+        // nesmaže → další pull ji vzkřísí → nekonečná smyčka create/merge).
+        if (hasIcloudCardConflict(cluster.contacts)) {
+          console.warn(
+            `[icloud-sync] auto-merge přeskočen: ${cluster.contacts.map((c) => c.displayName).join(" + ")} — ` +
+            `duplicitní karty na iCloudu, sluč ručně v Duplicity UI (smaže i kartu na iCloudu)`,
+          );
+          continue;
+        }
+        const sorted = cluster.contacts.slice().sort((a, b) => {
+          const pa = (a.isVip ? 100 : 0) + (a.clientTag ? 30 : 0) + (a.icloudUid ? 10 : 0);
+          const pb = (b.isVip ? 100 : 0) + (b.clientTag ? 30 : 0) + (b.icloudUid ? 10 : 0);
+          if (pa !== pb) return pb - pa;
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        });
+        const primary = sorted[0];
+        const secondaries = sorted.slice(1).map((c) => c.id);
+        if (secondaries.length === 0) continue;
+        const r = await mergeContacts(session.uid, primary.id, secondaries);
+        if (r.ok) {
+          autoMergeStats.merged += r.mergedCount;
+          autoMergeStats.clusters++;
+        }
+      } catch (e) {
+        // Jeden vadný cluster nesmí shodit zbytek úklidu
+        console.warn(`[icloud-sync] merge clusteru selhal:`, e instanceof Error ? (e.stack ?? e.message) : String(e));
       }
       processed++;
       if (processed % 5 === 0 || processed === clusters.length) {

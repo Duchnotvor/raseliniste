@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { pullIcloudContacts } from "@/lib/icloud-contacts";
-import { findDuplicateClusters, mergeContacts } from "@/lib/contacts-duplicates";
+import { findDuplicateClusters, mergeContacts, hasIcloudCardConflict } from "@/lib/contacts-duplicates";
 
 export const prerender = false;
 
@@ -66,11 +66,10 @@ export const POST: APIRoute = async ({ request }) => {
             // NEslučovat automaticky — smazání DB řádku nesmaže kartu na
             // iCloudu, další pull ji zase naimportuje a sync se točí v kruhu.
             // Duplicitní KARTY řeší Gideon ručně (Duplicity UI / iPhone).
-            const paired = cluster.contacts.filter((c) => c.icloudUid);
-            if (paired.length >= 2) {
+            if (hasIcloudCardConflict(cluster.contacts)) {
               console.warn(
                 `[cron.sync-contacts-icloud] přeskočen cluster ${cluster.contacts.map((c) => c.displayName).join(" + ")} — ` +
-                `${paired.length} kontaktů spárovaných na iCloud (duplicitní karty, sluč ručně v /contacts → Duplicity)`,
+                `duplicitní karty na iCloudu, sluč ručně v /contacts → Duplicity (smaže i kartu na iCloudu)`,
               );
               continue;
             }

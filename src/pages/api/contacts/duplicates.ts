@@ -41,7 +41,9 @@ export const POST: APIRoute = async ({ cookies, request }) => {
     return Response.json({ error: "Primární kontakt nemůže být v seznamu secondary." }, { status: 400 });
   }
 
-  const result = await mergeContacts(session.uid, body.primaryId, body.secondaryIds);
+  // FIX 2026-08-01: ruční merge maže i karty secondaries na iCloudu —
+  // jinak by je další pull vzkřísil jako nové kontakty (nekonečná smyčka).
+  const result = await mergeContacts(session.uid, body.primaryId, body.secondaryIds, { deleteIcloudCards: true });
   if (!result.ok) return Response.json(result, { status: 400 });
   return Response.json(result);
 };

@@ -19,7 +19,7 @@
 import type { APIRoute } from "astro";
 import { prisma } from "@/lib/db";
 import { readSession } from "@/lib/session";
-import { mergeContacts } from "@/lib/contacts-duplicates";
+import { mergeContacts, hasIcloudCardConflict } from "@/lib/contacts-duplicates";
 
 export const prerender = false;
 
@@ -107,8 +107,15 @@ export const POST: APIRoute = async ({ cookies }) => {
   let mergedClusters = 0;
   let errors = 0;
 
+  let skippedIcloudConflicts = 0;
   for (const members of clusters.values()) {
     if (members.length < 2) continue;
+    // FIX 2026-08-01: 2+ kontakty spárované na živé iCloud karty NEslučovat
+    // automaticky — delete DB řádku kartu nesmaže, další pull ji vzkřísí.
+    if (hasIcloudCardConflict(members.map((i) => contacts[i]))) {
+      skippedIcloudConflicts++;
+      continue;
+    }
     // Vyber primárku podle priority
     const sorted = members
       .map((i) => contacts[i])
@@ -141,6 +148,7 @@ export const POST: APIRoute = async ({ cookies }) => {
     totalClusters: Array.from(clusters.values()).filter((m) => m.length >= 2).length,
     mergedClusters,
     contactsRemoved: merged,
+    skippedIcloudConflicts,
     errors,
   });
 };
