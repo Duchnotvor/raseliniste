@@ -4,6 +4,64 @@
 > a ví kde se skončilo. Detail jednotlivých session bloků v
 > `INSTRUKCE/HANDOFF-*.md` a v memory souborech.
 
+## Session 2026-07-15 → 07-31 — Maraton: ICS kalendáře, Todoist feed, krevní výsledky, ADHD plánování, kontakty fix, velký audit
+
+**~45 commitů (85de5ef … 82a0f1d). Nejdelší souvislá session projektu.**
+
+### Nové moduly a featury
+
+- **Nahrané .ics kalendáře** (`/settings/local-calendars`): upload ICS → CalendarEvent
+  se source=LOCAL_ICS, display-only (žádný sync ven, booking neblokují). Recurring
+  expanze oknem -1r/+2r. POZOR na ICAL.js jump-forward (viz GOTCHAS).
+- **Todoist karta na dashboardu** (`Todoist — tým a hosté`): activity log unified v1
+  (probe /activity|/activities|/activity/get), jen akce KOLEGŮ/HOSTŮ (vlastní
+  odfiltrované přes GET /user), komentáře explicitně (object_type=note), jména
+  z kontaktů + collaborators API, projekt › úkol detail. Týdenní detail
+  `/todoist/aktivita` (?vse=1 = i moje).
+- **Krevní výsledky** (`/health/krev`): PDF → Gemini flash extrakce (60k tokenů,
+  thinking 1024, salvage parser) → HealthLabReport/Result → tabulka posledního
+  odběru (mimo normu Signal + šipky ↑↓), SSR grafy vývoje s ref pásmem, trend
+  zlepšení/zhoršení/stejné vs minulý odběr, vysvětlivky ~55 analytů na hover
+  (vlastní tooltip, ne title), AI shrnutí (reuse HealthAnalysis s krevním focusem),
+  lab data v měsíční analýze. + tiskový report tlaku `/health/tlak-report`
+  (tabulka Datum|Čas|Sys|Dia + SVG graf, Cmd+P → PDF).
+- **ADHD Plánování** (`/planovani`) — kompletní systém dle Gideonova dokumentu:
+  F1 board (Task.plannedFor, dny jako řádky, K naplánování po klientech,
+  WIP 3/den, schůzky s časy v hlavičce dne), F2 weekly review AI + nedělní
+  push 18:30, F3 šablona týdne (PlanningDayTemplate, badge, AI respekt,
+  SOFT_THEME_DAY), F4 digest pro kolegyni (cron 7:00 prac. dny),
+  **klientské bloky** (PlanningBlock — přetažení celého klienta na den,
+  úkoly klienta v bloku automaticky, 1 blok = 1 WIP). Návod v /navody/planovani
+  + docs/NAVOD-PLANOVANI.md.
+- **Dashboard**: sekce Dnes s reálnými daty (úkoly dnes + naplánované + události
+  + zápis dne), Moduly klikatelné (6/8 aktivních), počasí dnes+2 dny (Open-Meteo,
+  Jílové, cache 30 min), Plán s odskokem PROBÍHÁ vs denní program, narozeniny
+  zvýrazněné.
+- **Booking**: událost má blocksBooking override (auto/blokuje/neblokuje, toggle
+  v DayView) — Matějův program neblokuje (kromě lékaře dle regex), celodenní
+  markery (DOMA…) jen SOFT warning, booking nabídka filtruje všechna SOFT_*.
+- **Kontakty**: editace core polí (email/telefon/jméno) auto-push do iCloudu
+  s MERGE proti existující vCardě (PHOTO/URL/labely přežijí), pull etag-skip.
+- **PWA**: externí odkazy z iOS PWA do pravého Safari (x-safari-https:// scheme,
+  globální capture v Shell), Page Links.
+
+### Infrastruktura
+
+- **Repo přesunuto do org Mediaface-full (2026-07-21)**: image nově
+  `ghcr.io/mediaface-full/raseliniste/app` (stará /duchnotvor/ cesta je mrtvá,
+  ale zůstala veřejně dostupná — past!). Balíček v org musí být PUBLIC.
+  Org Settings → Actions → Workflow permissions: Read and write.
+
+### Velký audit 2026-07-31 (commit 82a0f1d)
+
+Gideon: „výpadky funkčnosti, projdi celé komplet." 5 paralelních review →
+25+ oprav (ztráta dat v kontaktech při auto-pushi, booking override díry,
+duplicitní ERRORy, AI WIP bez bloků, digest spam, SVG gradienty, glossary
+kolize, Todoist 429 visení dashboardu…). Detail v commit message 82a0f1d.
+Vědomě odloženo: Google pull umí vzkřísit smazaný e-mail (aditivní bez
+tombstonů), tabulka sloty bez orderBy, duplicitní iCloud karta únos párování,
+RECURRENCE-ID overrides v local-ics (duplicitní výskyt přesunuté instance).
+
 ## Session 2026-07-06 — Integrace SRO Manager (Studánka), výchozí Meet link kontaktu
 
 **5 commitů raseliniste + 2 commity sro-manager. Cross-repo práce (poprvé).**

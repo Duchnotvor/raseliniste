@@ -976,3 +976,87 @@ trvalo > 30 min: **přidat sem v stylu výše**.
 
 Plus mrkni do memory souborů (`~/.claude/projects/.../memory/`) — tam
 jsou další pasti které sem ještě nebyly synthesizovány.
+
+---
+
+## Session 2026-07-15 → 31 (maraton) — nové pasti
+
+### iCloud kontakty: lokální editace core polí BEZ pushe zmizí do 30 minut
+
+**Problém**: „5× jsem dal mail ke kontaktu a ani jednou se neuložil."
+**Příčina**: editor/tabulka ukládaly emaily/telefony jen do DB; iCloud pull
+(à 30 min) je při re-syncu přepsal z vCardy (iCloud = primárka core polí).
+**Řešení** (b83bb88, 2b5edb8): po změně core polí auto-push do iCloudu +
+pull přeskakuje kontakty se stejným etagem. **Pravidlo**: každá nová cesta,
+která zapisuje core pole kontaktu, MUSÍ volat pushContactToIcloud.
+
+### pushContactToIcloud MUSÍ mergovat s existující vCardou
+
+**Problém**: PUT je full-replace — build z DB mazal PHOTO, URL, TITLE,
+custom labely, X-ABDATE (vše, co parser nečte).
+**Řešení** (82a0f1d): mergeVCardPreservingUnknown — stáhne aktuální vCard,
+vymění jen spravovaná pole (FN/N/TEL/EMAIL/ORG/ADR/BDAY/NOTE/CATEGORIES),
+zbytek zachová vč. foldingu. Osiřelé itemN.X-ABLabel se čistí.
+
+### ICAL.js: event.iterator(startTime) PŘEPISUJE DTSTART
+
+Jump-forward na okno posune time-of-day všech occurrences na čas volání
+(trénink 07:30 → 15:08) a externalId s časem pak tvoří nová ID každý běh.
+**Vždy iterovat od DTSTART s vysokým safety limitem** (icloud-calendar 970c7a4,
+local-ics od začátku správně).
+
+### Booking pravidla: SOFT_* vs HARD_* a blocksBooking
+
+- Veřejná nabídka termínů (listAvailableSlots) filtruje VŠECHNA pravidla
+  s prefixem `SOFT_` — jsou to interní vodítka (šablona týdne, celodenní
+  markery), klientům termíny neberou. Nové soft pravidlo = automaticky OK.
+- Celodenní eventy (mimo OOO_FULL/HOCKEY_SON) NEblokují — Gideonův kalendář
+  je plný celodenních markerů (DOMA, TREB, volno…), tvrdé blokování = 0 slotů.
+- ICLOUD_SON neblokuje kromě regexu doprovodu (lékař|zubař|vyšetř…).
+- CalendarEvent.blocksBooking (null/true/false) přebíjí VŠE — každé nové
+  pravidlo v evaluateSlot musí respektovat `=== false` skip.
+- V busy loopu overlap check PRVNÍ, OOO_* mají vlastní pravidla (neduplikovat).
+
+### ghcr.io se při přesunu repa do organizace NEPŘESMĚRUJE
+
+Git redirect funguje, container registry ne — balíček zůstane u starého
+vlastníka ZMRAZENÝ ale veřejně stažitelný → NAS vesele pulluje starou image
+a hlásí úspěch. Po přesunu: změnit image cestu v compose (repo i NAS),
+balíček v org přepnout na PUBLIC, org Workflow permissions Read+write.
+
+### Deploy timing: Pull PŘED dokončením GH Actions buildu = stará image
+
+Stalo se 3×. Vždy počkat na zelenou fajfku v Actions (~5–10 min od pushe),
+teprve pak DSM Pull + Recreate. Ověření zvenku: anonymní token na
+ghcr.io/v2/.../tags/list obsahuje sha commitu.
+
+### Nativní title tooltip je k ničemu
+
+~2 s delay, titěrný, na mobilu neexistuje — Gideon: „nic nevyskakuje".
+Používat vlastní tooltip div na document.body (Portal pattern — .glass
+backdrop-filter láme position:fixed) s hover + tap toggle. Vzor: krev.astro.
+
+### Todoist v SSR: každé volání přes todoist.call() musí mít deadline
+
+call() při 429 spí až 30 minut (retry_after) — v cronu OK, v SSR renderu
+stránky katastrofa (dashboard visel). Wrap Promise.race s timeoutem
+(todoistTaskTitles 4 s) nebo AbortSignal.timeout (todoist-activity 5 s).
+
+### Recharts: barvy os/gridu nikdy hardcoded bílé + gradient id z barvy
+
+rgba(255,255,255,x) je ve světlém režimu neviditelné → var(--muted-foreground)
+/ color-mix. Gradient id NIKDY z oklch stringu bez sanitizace (mezery/% =
+nevalidní url(#…) → výplň spadne).
+
+### iOS PWA: externí odkazy ven jen přes x-safari-https:// (iOS 17+)
+
+target=_blank v standalone otevírá in-app sheet. Globální capture click
+handler v Shell.astro přepisuje externí https odkazy na scheme. iPadOS
+se hlásí jako Macintosh — detekce přes maxTouchPoints > 1. Host porovnávat
+bez www prefixu.
+
+### Fire-and-forget bez self-healu = zombie stavy po restartu
+
+Extrakce PDF žila jen v paměti — restart NASu nechal report „processing"
+navždy (UI polluje do nekonečna). Každý fire-and-forget status v DB potřebuje
+self-heal (labs: processing >15 min → error při GET listu) nebo retry UI.
