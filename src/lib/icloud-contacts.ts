@@ -182,11 +182,32 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
       message: `Ukládám kontakty do Rašeliniště (0/${contacts.length})…`,
     });
 
+    // FIX 2026-08-01 (Gideon: email u Dlouhého 8× zmizel): množina UID všech
+    // ŽIVÝCH karet v tomto pullu. L2 match (telefon/email) nesmí "ukrást"
+    // kontakt spárovaný s jinou kartou, která stále existuje — to není UID
+    // rotace, ale duplicitní karta na iCloudu. Krádež způsobovala flip-flop:
+    // každý pull přepároval kontakt mezi kartami a REPLACE mu smazal lokální
+    // editace (matched≈25 + updated≈25 každý běh v produkci).
+    const liveUids = new Set<string>();
+    for (const { parsed } of contacts) {
+      if (parsed.uid) liveUids.add(parsed.uid);
+    }
+
     // 1) Upsert kontaktů — match podle telefonu / emailu / icloudUid
     let upsertedCount = 0;
+    const seenUids = new Set<string>();
     for (const { item, parsed } of contacts) {
+      // Dvě karty se STEJNÝM UID (Apple duplicita) → zpracuj jen první;
+      // druhá by s tou první ping-pongovala etag/href na jednom DB řádku.
+      if (parsed.uid) {
+        if (seenUids.has(parsed.uid)) {
+          console.warn(`[icloud-sync] duplicitní UID ${parsed.uid} (${parsed.fn ?? "?"}) na více kartách — přeskočeno`);
+          continue;
+        }
+        seenUids.add(parsed.uid);
+      }
       try {
-        await upsertContact(userId, parsed, item.href, item.etag, stats);
+        await upsertContact(userId, parsed, item.href, item.etag, stats, liveUids);
       } catch (e) {
         console.warn(`[icloud-sync] contact ${parsed.uid} err:`, e instanceof Error ? e.message : e);
         stats.errors++;
@@ -250,6 +271,7 @@ async function upsertContact(
   href: string,
   etag: string,
   stats: SyncStats,
+  liveUids: Set<string>,
 ): Promise<void> {
   // 1) Match podle icloudUid (re-sync existujícího)
   let existing = parsed.uid
@@ -293,11 +315,23 @@ async function upsertContact(
         return false;
       });
 
-      // Preferenční pořadí: unpaired (icloudUid null) → s icloudUid (UID rotation)
-      existing = matches.find((c) => !c.icloudUid)
-        ?? matches.find((c) => c.icloudUid)
+      // FIX 2026-08-01: kandidát spárovaný s JINOU kartou, která v tomto
+      // pullu stále existuje, se NESMÍ ukrást — jeho karta žije, tohle je
+      // duplicitní karta na iCloudu (řeší Duplicity UI), ne UID rotace.
+      // Krást lze jen unpaired kontakty a kontakty s mrtvým UID (rotace).
+      const stealable = matches.filter((c) => !c.icloudUid || !liveUids.has(c.icloudUid));
+
+      // Preferenční pořadí: unpaired (icloudUid null) → s mrtvým icloudUid (UID rotation)
+      existing = stealable.find((c) => !c.icloudUid)
+        ?? stealable.find((c) => c.icloudUid)
         ?? null;
       if (existing) stats.matched++;
+      else if (matches.length > 0) {
+        console.warn(
+          `[icloud-sync] karta ${parsed.uid ?? "(bez UID)"} (${parsed.fn ?? "?"}) sdílí telefon/email ` +
+          `s kontaktem spárovaným na jinou živou kartu — zakládám samostatný kontakt (duplicita na iCloudu, viz /contacts → Duplicity)`,
+        );
+      }
     }
   }
 

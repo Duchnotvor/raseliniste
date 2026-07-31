@@ -61,23 +61,45 @@ export const POST: APIRoute = async ({ request }) => {
       try {
         const clusters = await findDuplicateClusters(userId);
         for (const cluster of clusters) {
-          const sorted = cluster.contacts.slice().sort((a, b) => {
-            const pa = (a.isVip ? 100 : 0) + (a.clientTag ? 30 : 0) + (a.icloudUid ? 10 : 0);
-            const pb = (b.isVip ? 100 : 0) + (b.clientTag ? 30 : 0) + (b.icloudUid ? 10 : 0);
-            if (pa !== pb) return pb - pa;
-            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-          });
-          const primary = sorted[0];
-          const secondaries = sorted.slice(1).map((c) => c.id);
-          if (secondaries.length === 0) continue;
-          const r = await mergeContacts(userId, primary.id, secondaries);
-          if (r.ok) {
-            mergedContacts += r.mergedCount;
-            mergedClusters++;
+          try {
+            // FIX 2026-08-01: cluster s 2+ kontakty spárovanými na iCloud
+            // NEslučovat automaticky — smazání DB řádku nesmaže kartu na
+            // iCloudu, další pull ji zase naimportuje a sync se točí v kruhu.
+            // Duplicitní KARTY řeší Gideon ručně (Duplicity UI / iPhone).
+            const paired = cluster.contacts.filter((c) => c.icloudUid);
+            if (paired.length >= 2) {
+              console.warn(
+                `[cron.sync-contacts-icloud] přeskočen cluster ${cluster.contacts.map((c) => c.displayName).join(" + ")} — ` +
+                `${paired.length} kontaktů spárovaných na iCloud (duplicitní karty, sluč ručně v /contacts → Duplicity)`,
+              );
+              continue;
+            }
+            const sorted = cluster.contacts.slice().sort((a, b) => {
+              const pa = (a.isVip ? 100 : 0) + (a.clientTag ? 30 : 0) + (a.icloudUid ? 10 : 0);
+              const pb = (b.isVip ? 100 : 0) + (b.clientTag ? 30 : 0) + (b.icloudUid ? 10 : 0);
+              if (pa !== pb) return pb - pa;
+              return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            });
+            const primary = sorted[0];
+            const secondaries = sorted.slice(1).map((c) => c.id);
+            if (secondaries.length === 0) continue;
+            const r = await mergeContacts(userId, primary.id, secondaries);
+            if (r.ok) {
+              mergedContacts += r.mergedCount;
+              mergedClusters++;
+            } else if (r.error) {
+              console.warn(`[cron.sync-contacts-icloud] merge clusteru ${primary.displayName} selhal: ${r.error}`);
+            }
+          } catch (e) {
+            // FIX 2026-08-01: jeden vadný cluster nesmí shodit celý úklid.
+            // Dřív catch obalil celou smyčku → po první chybě se nic dalšího
+            // nesloučilo a log ukázal jen prázdné "auto-merge failed:".
+            const names = cluster.contacts.map((c) => c.displayName).join(" + ");
+            console.warn(`[cron.sync-contacts-icloud] merge clusteru (${names}) selhal:`, e instanceof Error ? (e.stack ?? e.message) : String(e));
           }
         }
       } catch (e) {
-        console.warn("[cron.sync-contacts-icloud] auto-merge failed:", e instanceof Error ? e.message : e);
+        console.warn("[cron.sync-contacts-icloud] auto-merge failed:", e instanceof Error ? (e.stack ?? e.message) : String(e));
       }
 
       results.push({
