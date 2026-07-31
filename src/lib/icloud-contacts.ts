@@ -36,6 +36,7 @@ export interface SyncStats {
   matched: number;         // existujicí matched podle phone/email
   groups: number;          // počet zpracovaných skupin
   skippedUnchanged?: number; // etag beze změny → replace přeskočen (FIX 2026-07-31)
+  incompletePull?: boolean;  // část karet se nestáhla → párování tel/email tento běh vypnuto (FIX 2026-08-01)
   errors: number;
   durationMs: number;
   error?: string;
@@ -189,14 +190,20 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
     // každý pull přepároval kontakt mezi kartami a REPLACE mu smazal lokální
     // editace (matched≈25 + updated≈25 každý běh v produkci).
     //
-    // Pokud se část karet nepodařilo stáhnout/naparsovat, je liveUids
-    // NEÚPLNÉ → chybějící karta by vypadala jako mrtvý UID a její kontakt
-    // by šel ukrást. V tom případě liveUids = null = "nevíme" a steal
-    // spárovaných kontaktů se tento běh úplně zakáže (rozhodne příští pull).
-    const parsedCount = contacts.length + groups.length;
-    const pullIncomplete = parsedCount < items.length;
+    // Pokud se část karet nepodařilo STÁHNOUT, je liveUids NEÚPLNÉ →
+    // chybějící karta by vypadala jako mrtvý UID a její kontakt by šel
+    // ukrást. V tom případě liveUids = null = "nevíme" a steal spárovaných
+    // kontaktů se tento běh úplně zakáže (rozhodne příští pull).
+    //
+    // Měří se úplnost FETCHE (ne parsování): trvale neparsovatelná karta
+    // (stub bez jména/telefonu/emailu — parseVCardFull → null) by jinak
+    // vypínala párování NAVŽDY a potichu. Stub nemá telefon/email, takže
+    // pro liveUids/steal je irelevantní — stačí, že se stáhl.
+    const fetchedCount = fetched.filter((f) => Boolean(f.vcard)).length;
+    const pullIncomplete = fetchedCount < items.length;
     if (pullIncomplete) {
-      console.warn(`[icloud-sync] neúplný pull: naparsováno ${parsedCount}/${items.length} karet — párování podle telefonu/emailu tento běh vypnuto (ochrana proti únosu kontaktu)`);
+      stats.incompletePull = true;
+      console.warn(`[icloud-sync] neúplný pull: staženo ${fetchedCount}/${items.length} karet — párování podle telefonu/emailu tento běh vypnuto (ochrana proti únosu kontaktu)`);
     }
     const liveUids: Set<string> | null = pullIncomplete
       ? null

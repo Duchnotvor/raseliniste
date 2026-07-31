@@ -87,7 +87,7 @@ export default function ContactsDuplicates() {
     const confirmMsg = `Sloučit ${secondaries.length} duplicit do "${primaryName}"?\n\n` +
       `Telefony/emaily/skupiny: union. Chybějící pole doplníme. ` +
       `Overlay pole (VIP, aliasy, klient slug) zachováme primární.\n\n` +
-      `Sekundární kontakty se smažou.`;
+      `Sekundární kontakty se smažou — včetně jejich karet na iCloudu (jinak by je další sync vrátil).`;
     if (!confirm(confirmMsg)) return;
 
     setMerging(cluster.id);
@@ -104,10 +104,22 @@ export default function ContactsDuplicates() {
         setError(data.error ?? "Merge selhal.");
         return;
       }
-      setSuccess(`Sloučeno ${data.mergedCount} duplicit do "${primaryName}".`);
+      // FIX 2026-08-01: selhání mazání karet na iCloudu MUSÍ být vidět —
+      // jinak vypadá merge úspěšně, ale další sync smazaný kontakt vzkřísí.
+      const delErrors: string[] = data.icloudDeleteErrors ?? [];
+      if (delErrors.length > 0) {
+        setError(
+          `Sloučeno ${data.mergedCount} duplicit do "${primaryName}", ale nepodařilo se smazat ` +
+          `${delErrors.length} kart(y) na iCloudu — příští sync je může vrátit. ` +
+          `Smaž je ručně na iPhonu. Detail: ${delErrors.join(" · ")}`,
+        );
+      } else {
+        const delInfo = data.icloudDeleted ? ` Smazáno ${data.icloudDeleted} kart(y) i na iCloudu.` : "";
+        setSuccess(`Sloučeno ${data.mergedCount} duplicit do "${primaryName}".${delInfo}`);
+        setTimeout(() => setSuccess(null), 5000);
+      }
       // Odebrat cluster z UI
       setClusters((prev) => prev?.filter((c) => c.id !== cluster.id) ?? null);
-      setTimeout(() => setSuccess(null), 5000);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

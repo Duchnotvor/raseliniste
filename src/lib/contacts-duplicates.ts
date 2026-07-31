@@ -340,7 +340,10 @@ export async function mergeContacts(
             ? s.icloudHref!
             : new URL(s.icloudHref!, addressbookUrl).toString();
           try {
-            await deleteVCard(url, creds, s.icloudEtag);
+            // Bez If-Match (etag=null): DB etag může být až 30 min starý a
+            // stale If-Match → 412 → karta přežije a další pull ji vzkřísí.
+            // Uživatel delete explicitně vyžádal → unconditional DELETE.
+            await deleteVCard(url, creds, null);
             icloudDeleted++;
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
