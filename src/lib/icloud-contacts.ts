@@ -496,6 +496,63 @@ async function refreshContactGroupsField(userId: string): Promise<void> {
 // ============================================================================
 
 /**
+ * AUDIT FIX 2026-07-31: CardDAV PUT je full-replace, ale naše DB drží jen
+ * podmnožinu vCard polí. Plný rebuild by z iCloud karty SMAZAL fotku, URL,
+ * funkce, custom labely, výročí… Proto merge: z aktuální vCardy na serveru
+ * zachováme všechny neřízené řádky a nahradíme jen ty, které řídíme.
+ */
+const MANAGED_PROPS = new Set([
+  "VERSION", "PRODID", "UID", "FN", "N", "TEL", "EMAIL", "ORG", "ADR",
+  "BDAY", "NOTE", "CATEGORIES", "REV", "KIND", "X-ADDRESSBOOKSERVER-KIND",
+]);
+
+export function mergeVCardPreservingUnknown(existingRaw: string, built: string): string {
+  // Logické řádky se zachováním původního foldingu (pokračovací řádky
+  // začínají mezerou/tabem — PHOTO base64 apod. nechceme rozbalovat)
+  const logical = (txt: string): string[] => {
+    const out: string[] = [];
+    for (const l of txt.split(/\r?\n/)) {
+      if ((l.startsWith(" ") || l.startsWith("\t")) && out.length) out[out.length - 1] += "\r\n" + l;
+      else if (l.trim().length) out.push(l);
+    }
+    return out;
+  };
+  const headOf = (line: string): string => line.split(/[;:]/, 1)[0] ?? "";
+  const propOf = (line: string): string => {
+    const head = headOf(line);
+    const dot = head.indexOf(".");
+    return (dot >= 0 ? head.slice(dot + 1) : head).toUpperCase();
+  };
+  const groupOf = (line: string): string | null => {
+    const head = headOf(line);
+    const dot = head.indexOf(".");
+    return dot >= 0 ? head.slice(0, dot) : null;
+  };
+
+  const exist = logical(existingRaw);
+  // Skupiny (itemN.), jejichž hlavní property řídíme → zahodit včetně
+  // jejich X-ABLabel (jinak by zůstaly osiřelé labely)
+  const managedGroups = new Set<string>();
+  for (const l of exist) {
+    const g = groupOf(l);
+    if (g && MANAGED_PROPS.has(propOf(l))) managedGroups.add(g);
+  }
+  const preserved = exist.filter((l) => {
+    const p = propOf(l);
+    if (p === "BEGIN" || p === "END") return false;
+    if (MANAGED_PROPS.has(p)) return false;
+    const g = groupOf(l);
+    if (g && managedGroups.has(g)) return false;
+    return true;
+  });
+  const builtLines = logical(built).filter((l) => {
+    const p = propOf(l);
+    return p !== "BEGIN" && p !== "END";
+  });
+  return ["BEGIN:VCARD", ...builtLines, ...preserved, "END:VCARD"].join("\r\n") + "\r\n";
+}
+
+/**
  * Push single contact zpět na iCloud. Vola se po edit v tabulce.
  * Pokud Contact nemá icloudUid (nový kontakt vytvořený v Rašeliništi),
  * vygeneruje UID a vytvoří vCard na serveru.
@@ -549,8 +606,31 @@ export async function pushContactToIcloud(userId: string, contactId: string): Pr
     ? (contact.icloudHref.startsWith("http") ? contact.icloudHref : new URL(contact.icloudHref, addressbookUrl).toString())
     : `${addressbookUrl.replace(/\/$/, "")}/${uid}.vcf`;
 
+  // AUDIT FIX 2026-07-31: u existující karty NEJDŘÍV stáhni aktuální vCard —
+  // (a) merge zachová pole, která neřídíme (fotka, URL, labely…),
+  // (b) čerstvý etag řeší 412 smyčku (DB etag mohl zestárnout / být null).
+  // Když se stažení nepovede, push RADĚJI ZRUŠIT než full-replace = ztráta dat.
+  let finalVcard = vcard;
+  let ifMatchEtag: string | null | undefined = contact.icloudEtag;
+  if (contact.icloudHref) {
+    const hrefPath = contact.icloudHref.startsWith("http")
+      ? new URL(contact.icloudHref).pathname
+      : contact.icloudHref;
+    try {
+      const items = await fetchAddressbookItems(addressbookUrl, creds, [hrefPath]);
+      const current = items[0];
+      if (!current?.vcard) {
+        return { ok: false, error: "Aktuální vCard se nepodařilo načíst z iCloudu — push zrušen (ochrana proti přepsání karty)." };
+      }
+      finalVcard = mergeVCardPreservingUnknown(current.vcard, vcard);
+      ifMatchEtag = current.etag || contact.icloudEtag;
+    } catch (e) {
+      return { ok: false, error: `Načtení aktuální vCard selhalo (${e instanceof Error ? e.message : e}) — push zrušen.` };
+    }
+  }
+
   try {
-    const result = await putVCard(url, creds, vcard, contact.icloudEtag);
+    const result = await putVCard(url, creds, finalVcard, ifMatchEtag);
     await prisma.contact.update({
       where: { id: contactId },
       data: {

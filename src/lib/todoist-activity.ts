@@ -33,7 +33,9 @@ export interface TodoistActivityEvent {
 let workingPath: string | null = null;
 
 async function rawFetch(token: string, params: string): Promise<{ events: unknown[] }> {
-  const paths = workingPath ? [workingPath] : CANDIDATE_PATHS;
+  // AUDIT 2026-07-31: memoizovaná cesta může časem začít vracet 404/410 —
+  // pak reset a přeprobuj všechny kandidáty (dřív se zafixovala navždy).
+  const paths = workingPath ? [workingPath, ...CANDIDATE_PATHS.filter((p) => p !== workingPath)] : CANDIDATE_PATHS;
   let lastErr: Error | null = null;
   for (const p of paths) {
     const res = await fetch(`${BASE}${p}?${params}`, {
@@ -41,15 +43,23 @@ async function rawFetch(token: string, params: string): Promise<{ events: unknow
       signal: AbortSignal.timeout(5000),
     });
     if (res.status === 404 || res.status === 410) {
+      if (workingPath === p) workingPath = null;
       lastErr = new Error(`${p} → ${res.status}`);
       continue;
     }
     if (!res.ok) throw new Error(`Todoist activity ${p} → ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const json = (await res.json()) as Record<string, unknown>;
+    // v1 wrapper {results, next_cursor}, Sync-style {events}, případně holé pole.
+    // AUDIT 2026-07-31: cestu memoizovat JEN při validním tvaru — 200
+    // s neznámým tvarem ({error:...}, HTML) dřív zafixovalo cestu a feed
+    // byl tiše prázdný navždy.
+    const raw = json.results ?? json.events ?? json;
+    if (!Array.isArray(raw)) {
+      lastErr = new Error(`${p} → 200, ale neznámý tvar odpovědi`);
+      continue;
+    }
     workingPath = p;
-    // v1 wrapper {results, next_cursor}, Sync-style {events}, případně holé pole
-    const events = (json.results ?? json.events ?? json) as unknown[];
-    return { events: Array.isArray(events) ? events : [] };
+    return { events: raw };
   }
   throw lastErr ?? new Error("Todoist activity: no endpoint responded");
 }
@@ -136,7 +146,10 @@ export async function fetchOwnTodoistUserId(token: string): Promise<string | nul
       if (json.id != null) id = String(json.id);
     }
   } catch { /* null fallback */ }
-  cachedOwnId = { token, id };
+  // AUDIT 2026-07-31: selhání NEkešovat — trvalé null by navždy vyplo
+  // filtr vlastních akcí (karta by ukazovala i Gideona). Retry při
+  // dalším volání.
+  if (id !== null) cachedOwnId = { token, id };
   return id;
 }
 
@@ -222,12 +235,18 @@ export async function todoistTaskTitles(token: string, ids: string[]): Promise<M
       toFetch.push(id);
     }
   }
+  // AUDIT 2026-07-31: getTask jde přes todoist.call() bez timeoutu a s 429
+  // retry sleep až 30 min — na dashboardu SSR nesmí viset. Tvrdý strop 4 s
+  // per task; co se nestihne, prostě nemá titulek (zkusí se příště).
+  const withDeadline = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+    Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
   const CONCURRENCY = 4;
   for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
     await Promise.all(
       toFetch.slice(i, i + CONCURRENCY).map(async (id) => {
         try {
-          const task = await getTask(token, id);
+          const task = await withDeadline(getTask(token, id), 4000);
+          if (task === null) return; // timeout — necachovat, zkusit příště
           taskTitleCache.set(id, { fetchedAt: now, title: task?.content ?? null });
           if (task?.content) result.set(id, task.content);
         } catch {

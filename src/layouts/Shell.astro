@@ -289,8 +289,13 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
       = otevře skutečné Safari. Capture fáze předběhne i React onClick
       handlery. Mimo iOS standalone se nic nemění. */}
   <script>
+    // AUDIT 2026-07-31: iPadOS se hlásí jako Macintosh (desktop UA) —
+    // poznáme ho přes maxTouchPoints
+    const isIosDevice =
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1);
     const iosPwa =
-      /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+      isIosDevice &&
       ((navigator as { standalone?: boolean }).standalone === true ||
         matchMedia("(display-mode: standalone)").matches);
     if (iosPwa) {
@@ -299,7 +304,10 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
         (e) => {
           const target = e.target as Element | null;
           const a = target?.closest?.('a[href^="https://"]') as HTMLAnchorElement | null;
-          if (!a || a.host === location.host) return;
+          if (!a) return;
+          // AUDIT 2026-07-31: raseliniste.cz vs www.raseliniste.cz = pořád my
+          const strip = (h: string) => h.replace(/^www\./, "");
+          if (strip(a.hostname) === strip(location.hostname)) return;
           e.preventDefault();
           e.stopPropagation();
           location.href = "x-safari-https://" + a.href.slice("https://".length);

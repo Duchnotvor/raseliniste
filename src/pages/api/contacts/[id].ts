@@ -67,10 +67,15 @@ export const PATCH: APIRoute = async ({ request, cookies, params }) => {
   // Pokud se posílají phones/emails, nahraď je celé (jednodušší než diff)
   if (body.phones) {
     await prisma.phone.deleteMany({ where: { contactId: id } });
+    // AUDIT FIX 2026-07-31: číslo, které normalizace neuzná, se dřív tiše
+    // ZAHODILO (a auto-push ho pak smazal i z iCloudu). Fallback na raw —
+    // stejně jako pull a tabulka.
     const normalized = body.phones
       .map((p) => {
-        const n = normalizePhone(p.number);
-        return n ? { contactId: id, number: n, label: p.label ?? null } : null;
+        const raw = p.number.trim();
+        if (!raw) return null;
+        const n = normalizePhone(raw) ?? raw;
+        return { contactId: id, number: n, label: p.label ?? null };
       })
       .filter((x): x is { contactId: string; number: string; label: string | null } => x !== null);
     if (normalized.length > 0) {

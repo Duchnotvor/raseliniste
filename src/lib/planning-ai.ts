@@ -53,7 +53,7 @@ export async function proposeWeekPlan(userId: string, mondayKey: string): Promis
   const dkey = (d: Date) => d.toLocaleDateString("sv-SE");
   const todayKey = dkey(new Date());
 
-  const [unplanned, overduePlanned, plannedInWeek, events, projects] = await Promise.all([
+  const [unplanned, overduePlanned, plannedInWeek, weekBlocks, events, projects] = await Promise.all([
     prisma.task.findMany({
       where: { userId, status: "open", plannedFor: null },
       select: { id: true, title: true, priority: true, dueAt: true, tags: true, todoistProjectId: true },
@@ -69,6 +69,12 @@ export async function proposeWeekPlan(userId: string, mondayKey: string): Promis
     prisma.task.findMany({
       where: { userId, status: "open", plannedFor: { gte: monday, lt: nextMonday } },
       select: { id: true, title: true, plannedFor: true },
+    }),
+    // AUDIT 2026-07-31: klientské bloky se počítají do WIP (board je počítá,
+    // AI je neviděla → přeplnila dny)
+    prisma.planningBlock.findMany({
+      where: { userId, date: { gte: monday, lt: nextMonday } },
+      select: { date: true, label: true },
     }),
     prisma.calendarEvent.findMany({
       where: {
@@ -118,6 +124,14 @@ export async function proposeWeekPlan(userId: string, mondayKey: string): Promis
     const key = t.plannedFor ? dkey(t.plannedFor) : "";
     existingPerDay.set(key, (existingPerDay.get(key) ?? 0) + 1);
   }
+  const blocksPerDay = new Map<string, string[]>();
+  for (const b of weekBlocks) {
+    const key = dkey(b.date);
+    existingPerDay.set(key, (existingPerDay.get(key) ?? 0) + 1);
+    const arr = blocksPerDay.get(key) ?? [];
+    arr.push(b.label);
+    blocksPerDay.set(key, arr);
+  }
 
   const template = await getWeekTemplate().catch(() => new Map<number, TemplateDay>());
   const DAY_LABELS = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
@@ -130,7 +144,8 @@ export async function proposeWeekPlan(userId: string, mondayKey: string): Promis
       key < todayKey ? "UŽ PROBĚHL — nepoužívat" : null,
       tpl ? `režim: ${MODE_INFO[tpl.mode].name}${tpl.label ? ` (${tpl.label})` : ""} — ${MODE_INFO[tpl.mode].hint}` : null,
       `schůzek: ${(busy.get(key) ?? 0).toFixed(1)} h`,
-      `už naplánováno úkolů: ${existingPerDay.get(key) ?? 0}`,
+      `už naplánováno (úkoly + bloky): ${existingPerDay.get(key) ?? 0}`,
+      blocksPerDay.get(key)?.length ? `klientské bloky: ${blocksPerDay.get(key)!.join(", ")} — na tento den plánuj max úkoly TĚCHTO klientů` : null,
       allDayNotes.get(key)?.length ? `celodenní: ${allDayNotes.get(key)!.join(", ")}` : null,
     ].filter(Boolean);
     return `- ${parts.join(" | ")}`;

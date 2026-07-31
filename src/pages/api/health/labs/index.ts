@@ -13,6 +13,18 @@ export const GET: APIRoute = async ({ cookies }) => {
   const session = await readSession(cookies);
   if (!session) return Response.json({ error: "UNAUTHENTICATED" }, { status: 401 });
 
+  // AUDIT 2026-07-31: fire-and-forget extrakce žije jen v paměti — restart
+  // kontejneru uprostřed nechal report navždy "processing" (UI polluje do
+  // nekonečna, retry tlačítko se neukázalo). Self-heal: >15 min = error.
+  await prisma.healthLabReport.updateMany({
+    where: {
+      userId: session.uid,
+      status: "processing",
+      createdAt: { lt: new Date(Date.now() - 15 * 60 * 1000) },
+    },
+    data: { status: "error", processingError: "Zpracování přerušeno (restart aplikace) — spusť extrakci znovu." },
+  });
+
   const reports = await prisma.healthLabReport.findMany({
     where: { userId: session.uid },
     orderBy: [{ sampledAt: "desc" }, { createdAt: "desc" }],

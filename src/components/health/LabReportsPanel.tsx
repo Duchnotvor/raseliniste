@@ -31,10 +31,18 @@ export default function LabReportsPanel({ initialReports }: { initialReports: La
   const hadProcessing = useRef(initialReports.some((r) => r.status === "processing"));
 
   async function refresh(): Promise<LabReport[]> {
-    const res = await fetch("/api/health/labs");
-    const data = await res.json();
-    if (res.ok) setReports(data.reports);
-    return data.reports ?? [];
+    try {
+      const res = await fetch("/api/health/labs");
+      const data = await res.json();
+      // AUDIT 2026-07-31: i při neúspěchu vyrobit nové pole — polling effect
+      // závisí na změně identity reports; jinak po jednom failu umřel.
+      if (res.ok) setReports(data.reports);
+      else setReports((prev) => [...prev]);
+      return data.reports ?? [];
+    } catch {
+      setReports((prev) => [...prev]);
+      return [];
+    }
   }
 
   // Tiché polling dokud něco běží; jakmile poslední doběhne, reload

@@ -34,6 +34,9 @@ export interface EvaluateInput {
   endsAt: Date;
   locationName?: string | null;
   excludeEventId?: string;        // pro re-evaluaci existujícího (vyloučit ze srážek)
+  // AUDIT 2026-07-31: při retry rezervace vyloučit VLASTNÍ pseudo-event
+  // (RESERVED invite se jinak zablokoval sám o sebe)
+  excludeBookingInviteId?: string;
   bookingMode?: "CLIENT" | "FRIEND" | null;  // jen pro booking-only pravidla
 }
 
@@ -60,8 +63,9 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     where: {
       deletedRemotely: false,
       // Petr 2026-07-15: nahrané .ics kalendáře jsou čistě informativní —
-      // nesmí blokovat booking sloty ani quickadd evaluaci
-      source: { not: "LOCAL_ICS" },
+      // nesmí blokovat booking. AUDIT 2026-07-31: VÝJIMKA ruční override
+      // blocksBooking=true (toggle v DayView byl na .ics jinak nefunkční).
+      OR: [{ source: { not: "LOCAL_ICS" } }, { blocksBooking: true }],
       AND: [{ endsAt: { gte: queryFrom } }, { startsAt: { lte: queryTo } }],
       ...(input.excludeEventId ? { id: { not: input.excludeEventId } } : {}),
     },
@@ -89,6 +93,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     },
   });
   const bookingPseudoEvents = activeBookings
+    .filter((b) => b.id !== input.excludeBookingInviteId)
     .map((b) => {
       const slot = b.reservedSlot as { startsAt?: string; endsAt?: string; type?: string } | null;
       if (!slot?.startsAt || !slot?.endsAt) return null;
@@ -113,8 +118,10 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
   const sameWindow = [...calendarEvents, ...bookingPseudoEvents];
 
   // Eventy v daný den (pro per-day count pravidla)
+  // AUDIT 2026-07-31: události s ručním „neblokuje" se nepočítají ani do
+  // denních counterů / weighted loadu (nemusím tam být = nezatěžují den)
   const sameDay = sameWindow.filter((e) =>
-    !(e.endsAt < dayStart || e.startsAt > dayEnd),
+    !(e.endsAt < dayStart || e.startsAt > dayEnd) && e.blocksBooking !== false,
   );
 
   // ---- HARD pravidla (ERROR) ----
@@ -157,6 +164,9 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     const SON_ESCORT_RE = /l[ée]ka[řr]|doktor|zuba[řr]|ordinac|vy[šs]et[řr]|o[čc]kov|pohotovost|logoped|ortodon/i;
     let allDaySoft: string | null = null;
     for (const e of sameWindow) {
+      // AUDIT 2026-07-31: overlap check PRVNÍ — jinak override/soft větve
+      // vyráběly warning i pro události ze sousedních dnů (sameWindow = ±1 den)
+      if (!overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) continue;
       // Ruční override má vždy přednost (Petr 2026-07-30)
       if (e.blocksBooking === false) {
         if (!allDaySoft) allDaySoft = e.title;
@@ -164,9 +174,11 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
       }
       const forced = e.blocksBooking === true;
       if (!forced && NON_BLOCKING.has(e.type)) continue;
-      // OOO_TRAVEL_WORKING blokuje jen prezenční, online ne (řeší HARD_OOO_TRAVEL_INPERSON výše)
-      if (!forced && e.type === "OOO_TRAVEL_WORKING" && input.type === "MEETING_ONLINE") continue;
-      if (!overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) continue;
+      // AUDIT 2026-07-31: OOO_FULL a OOO_TRAVEL_WORKING mají vlastní tvrdá
+      // pravidla NÍŽE (respektující override) — tady je přeskočit, jinak
+      // vznikal duplicitní ERROR pro tutéž událost
+      if (!forced && e.type === "OOO_FULL") continue;
+      if (!forced && e.type === "OOO_TRAVEL_WORKING") continue;
       // Petr 2026-07-30: Matějův program (ICLOUD_SON) je INFO — u většiny
       // nemusí být (camp, škola). Blokuje jen doprovod dle klíčových slov
       // (lékař…) nebo ruční override. Hokej řeší HARD_HOCKEY_BLOCK výše.
@@ -183,14 +195,8 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
         if (!allDaySoft) allDaySoft = e.title;
         continue;
       }
-      // Skip když už existuje specifický signál pro tenhle event (HOCKEY/OOO_FULL výše)
-      const alreadyFlagged =
-        signals.some((s) =>
-          s.rule === "HARD_HOCKEY_BLOCK" ||
-          s.rule === "HARD_OOO_FULL" ||
-          s.rule === "HARD_OOO_TRAVEL_INPERSON",
-        );
-      if (alreadyFlagged) break;
+      // Skip když už hokej pushnul specifický signál (OOO řešeno skipem výše)
+      if (signals.some((s) => s.rule === "HARD_HOCKEY_BLOCK")) break;
       signals.push({
         rule: "HARD_BUSY_OVERLAP",
         severity: "ERROR",
@@ -223,6 +229,9 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
   // HARD_OOO_TRAVEL_INPERSON: nomád období + prezenční
   if (isInPerson(input.type)) {
     for (const e of sameWindow) {
+      // AUDIT 2026-07-31: respektovat ruční override (chybělo — toggle
+      // „neblokuje" na travel eventu byl pro prezenční sloty nefunkční)
+      if (e.blocksBooking === false) continue;
       if (e.type === "OOO_TRAVEL_WORKING" && overlap(e.startsAt, e.endsAt, input.startsAt, input.endsAt)) {
         signals.push({
           rule: "HARD_OOO_TRAVEL_INPERSON",

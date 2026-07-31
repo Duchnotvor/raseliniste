@@ -61,7 +61,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
   const [contacts, total, groupsRaw] = await Promise.all([
     prisma.contact.findMany({
       where,
-      include: { phones: true, emails: true },
+      include: { phones: { orderBy: { id: "asc" } }, emails: { orderBy: { id: "asc" } } },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { displayName: "asc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -162,7 +162,7 @@ export const PATCH: APIRoute = async ({ cookies, request }) => {
     try {
       const contact = await prisma.contact.findFirst({
         where: { id: contactId, userId: session.uid },
-        include: { phones: true, emails: true },
+        include: { phones: { orderBy: { id: "asc" } }, emails: { orderBy: { id: "asc" } } },
       });
       if (!contact) {
         results.push({ id: contactId, ok: false, error: "NOT_FOUND" });

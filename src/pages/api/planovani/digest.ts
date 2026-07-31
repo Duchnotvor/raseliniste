@@ -22,7 +22,15 @@ export const GET: APIRoute = async ({ cookies, url }) => {
   });
 
   if (url.searchParams.get("nahled") === "1") {
-    const contactId = settings?.digestContactId;
+    // AUDIT 2026-07-31: náhled bere ?contactId= (aktuální výběr v UI před
+    // uložením), fallback na uložené nastavení
+    const requested = url.searchParams.get("contactId");
+    let contactId = settings?.digestContactId ?? null;
+    if (requested) {
+      const c = await prisma.contact.findFirst({ where: { id: requested, userId: session.uid }, select: { id: true } });
+      if (!c) return Response.json({ error: "Kontakt nenalezen." }, { status: 404 });
+      contactId = c.id;
+    }
     if (!contactId) return Response.json({ error: "Nejdřív vyber kolegyni." }, { status: 400 });
     const digest = await buildKolegyneDigest(session.uid, contactId);
     return Response.json({ ok: true, ...digest });

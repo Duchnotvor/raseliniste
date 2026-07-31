@@ -106,8 +106,13 @@ const [weekTasks, overdueTasks, candidateTasks, candidateTotal] = await Promise.
     where: { userId: session.uid, status: "open", plannedFor: { gte: monday, lt: nextMonday } },
     select: taskSelect,
   }),
+  // AUDIT 2026-07-31: „z minula" = před dneškem, ne před zobrazeným týdnem —
+  // při prohlížení budoucího týdne se jinak aktuální týden tvářil jako přeteklý
   prisma.task.findMany({
-    where: { userId: session.uid, status: "open", plannedFor: { lt: monday } },
+    where: {
+      userId: session.uid, status: "open",
+      plannedFor: { lt: new Date(Math.min(monday.getTime(), new Date(new Date().setHours(0, 0, 0, 0)).getTime())) },
+    },
     select: taskSelect,
     orderBy: { plannedFor: "asc" },
     take: 30,

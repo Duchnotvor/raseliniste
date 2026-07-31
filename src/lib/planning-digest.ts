@@ -57,12 +57,16 @@ export async function buildKolegyneDigest(userId: string, digestContactId: strin
       orderBy: { startsAt: "asc" },
       take: 10,
     }),
+    // AUDIT 2026-07-31: dřív chytalo VŠECHNY otevřené úkoly (i roky staré
+    // termíny a bez termínu) → mail denně identicky spamoval 10 nejstarších
+    // a „prázdný den" nikdy nenastal. Teď jen aktuální okno: termín od
+    // -3 dnů (čerstvě prošlé) do +7 dnů.
     prisma.task.findMany({
       where: {
         userId,
         status: "open",
         assignedToContactId: digestContactId,
-        OR: [{ dueAt: { lte: weekAhead } }, { dueAt: null }],
+        dueAt: { gte: new Date(today.getTime() - 3 * 86_400_000), lte: weekAhead },
       },
       select: { title: true, dueAt: true, todoistProjectId: true, priority: true },
       orderBy: [{ dueAt: "asc" }, { priority: "desc" }],

@@ -211,7 +211,11 @@ const outOfRange = (f: string | null) => f === "H" || f === "L";
                   ? { text: `${arrow} zlepšení`, cls: "text-[var(--tint-sage)]" }
                   : dNow > dPrev
                     ? { text: `${arrow} zhoršení`, cls: "text-[color:var(--c-signal)]" }
-                    : { text: latest.value === prev.value ? "→ stejné" : `${arrow} v normě`, cls: "text-muted-foreground" };
+                    : dNow > 0
+                      // AUDIT 2026-07-31: stejná vzdálenost, ale MIMO normu —
+                      // „v normě/stejné" bylo zavádějící
+                      ? { text: `${arrow} stále mimo normu`, cls: "text-[color:var(--c-signal)]" }
+                      : { text: latest.value === prev.value ? "→ stejné" : `${arrow} v normě`, cls: "text-muted-foreground" };
               } else {
                 trend = { text: `${arrow} ${latest.value === prev.value ? "stejné" : "změna"}`, cls: "text-muted-foreground" };
               }

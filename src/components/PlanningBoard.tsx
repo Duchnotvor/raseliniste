@@ -123,9 +123,10 @@ export default function PlanningBoard({ weekStart, days, initialCards, initialBl
         body: JSON.stringify({ assignments: chosen.map((p) => ({ taskId: p.taskId, date: p.date })) }),
       });
       if (!res.ok) { setError("Potvrzení se nepovedlo."); return; }
-      const map = new Map(chosen.map((p) => [p.taskId, p.date]));
-      setCards((cs) => cs.map((c) => (map.has(c.id) ? { ...c, plannedFor: map.get(c.id)!, overdue: false } : c)));
-      setProposals(null);
+      // AUDIT 2026-07-31: AI kandidáti jsou širší množina než karty na
+      // boardu — lokální přemapování část potvrzených úkolů NEzobrazilo
+      // (vypadalo jako ztráta). Reload = SSR ukáže vše.
+      window.location.reload();
     } finally {
       setConfirming(false);
     }
@@ -203,13 +204,23 @@ export default function PlanningBoard({ weekStart, days, initialCards, initialBl
       setError("Blok se nepodařilo uložit.");
       return;
     }
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
+    if (!data?.block?.id) {
+      // AUDIT 2026-07-31: bez id by blok zůstal navždy s temp id
+      setBlocks((bs) => bs.filter((b) => b.id !== tempId));
+      setError("Blok se nepodařilo uložit (neplatná odpověď).");
+      return;
+    }
     setBlocks((bs) => bs.map((b) => (b.id === tempId ? { ...b, id: data.block.id } : b)));
   }
 
   async function moveBlock(blockId: string, date: string) {
     const prev = blocks;
-    setBlocks((bs) => bs.map((b) => (b.id === blockId ? { ...b, date } : b)));
+    // AUDIT 2026-07-31: kolize (stejný klient už na cílovém dni) — server
+    // duplikát smaže, tady ho odstraníme ze state taky (dřív zůstal ghost).
+    setBlocks((bs) => bs
+      .filter((b) => !(b.date === date && b.id !== blockId && b.clientKey === bs.find((x) => x.id === blockId)?.clientKey))
+      .map((b) => (b.id === blockId ? { ...b, date } : b)));
     const res = await fetch("/api/planovani/blok", {
       method: "PATCH",
       headers: { "content-type": "application/json" },

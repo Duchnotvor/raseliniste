@@ -19,8 +19,9 @@ const GLOSSARY: GlossaryEntry[] = [
   { match: ["hematokrit"], text: "Podíl červených krvinek na objemu krve. Souvisí s anémií i zavodněním organismu." },
   { match: ["trombocyty", "plt", "destic"], text: "Krevní destičky — srážení krve. Málo = sklon ke krvácení, hodně = riziko sraženin." },
   { match: ["mcv", "stredni-objem"], text: "Průměrná velikost červené krvinky. Pomáhá rozlišit typ anémie (malé = nedostatek železa, velké = B12/folát)." },
-  { match: ["mch", "barvivo-erytr"], text: "Průměrné množství hemoglobinu v jedné červené krvince. Doplňuje obraz anémie." },
+  // mchc PŘED mch (substring "barvivo-erytr" by jinak MCHC chytil na MCH text)
   { match: ["mchc"], text: "Koncentrace hemoglobinu v červených krvinkách. Další ukazatel typu anémie." },
+  { match: ["mch"], text: "Průměrné množství hemoglobinu v jedné červené krvince. Doplňuje obraz anémie." },
   { match: ["rdw"], text: "Rozptyl velikostí červených krvinek. Zvýšený bývá časnou známkou nedostatku železa nebo B12." },
   { match: ["neutrofily"], text: "Nejpočetnější bílé krvinky — první obrana proti bakteriím. Rostou při bakteriální infekci a stresu." },
   { match: ["lymfocyty"], text: "Bílé krvinky specializované na viry a imunitní paměť. Rostou při virózách." },
@@ -58,6 +59,8 @@ const GLOSSARY: GlossaryEntry[] = [
 
   // ---- Tuky ----
   { match: ["cholesterol-celk", "celkovy-cholesterol"], text: "Součet všech typů cholesterolu. Sám o sobě říká málo — důležitý je poměr LDL/HDL." },
+  // non-HDL PŘED hdl — jinak by dostal opačné vysvětlení (AUDIT 2026-07-31)
+  { match: ["non-hdl"], text: "Všechen „rizikový“ cholesterol dohromady (celkový minus HDL). Čím nižší, tím lépe — přesnější ukazatel rizika než celkový cholesterol." },
   { match: ["ldl"], text: "„Zlý“ cholesterol — ukládá se do cév a zvyšuje riziko infarktu. Čím nižší, tím lépe." },
   { match: ["hdl"], text: "„Hodný“ cholesterol — odváží tuk z cév. Vyšší = ochranný. Zvedá ho pohyb." },
   { match: ["triacylglycerol", "triglycerid"], text: "Tuky z jídla a cukrů. Zvýšené po sladkém, alkoholu a při nadváze; velmi ovlivněné jídlem před odběrem." },
@@ -86,10 +89,21 @@ const GLOSSARY: GlossaryEntry[] = [
   { match: ["ldh"], text: "Enzym přítomný ve všech tkáních — nespecifický ukazatel rozpadu buněk." },
 ];
 
-/** Najdi vysvětlivku podle analyteKey (slug). Null když nemáme. */
+/**
+ * Najdi vysvětlivku podle analyteKey (slug). Null když nemáme.
+ * AUDIT 2026-07-31: krátké tokeny (≤4 znaky, bez pomlčky) matchují jen jako
+ * CELÝ segment slugu — substring dělal kolize: "ast" chytal elastázu,
+ * "mch" chytal MCHC, "ph" chytal anglické názvy (lymphocytes…).
+ */
 export function labExplanation(analyteKey: string): string | null {
+  const segments = analyteKey.split("-");
   for (const entry of GLOSSARY) {
-    if (entry.match.some((m) => analyteKey.includes(m))) return entry.text;
+    for (const m of entry.match) {
+      const hit = m.length <= 4 && !m.includes("-")
+        ? segments.includes(m)
+        : analyteKey.includes(m);
+      if (hit) return entry.text;
+    }
   }
   return null;
 }

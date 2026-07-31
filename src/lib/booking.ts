@@ -194,6 +194,9 @@ export async function reserveSlot(input: ReserveInput): Promise<{
     startsAt: input.slot.startsAt,
     endsAt: input.slot.endsAt,
     bookingMode: invite.mode as BookingModeStr,
+    // AUDIT 2026-07-31: retry po selhaném confirmu — vlastní RESERVED slot
+    // nesmí blokovat sám sebe
+    excludeBookingInviteId: invite.id,
   });
   if (evaluation.verdict === "RED") {
     throw new Error(`Slot už není dostupný: ${evaluation.signals[0]?.message ?? "konflikt"}`);

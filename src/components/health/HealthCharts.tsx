@@ -118,11 +118,14 @@ export function SimpleAreaChart({
   decimals?: number;
   label?: string;
 }) {
+  // AUDIT 2026-07-31: id z oklch barvy ("g-% 0.12 92)") = nevalidní url(#…)
+  // → gradient se neaplikoval. Sanitizace na [a-z0-9].
+  const gradId = `g-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
     <ResponsiveContainer width="100%" height={200}>
       <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <defs>
-          <linearGradient id={`g-${color.slice(-10)}`} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity={0.35} />
             <stop offset="100%" stopColor={color} stopOpacity={0.02} />
           </linearGradient>
@@ -137,7 +140,7 @@ export function SimpleAreaChart({
           name={label}
           stroke={color}
           strokeWidth={2}
-          fill={`url(#g-${color.slice(-10)})`}
+          fill={`url(#${gradId})`}
           isAnimationActive={false}
         />
       </AreaChart>

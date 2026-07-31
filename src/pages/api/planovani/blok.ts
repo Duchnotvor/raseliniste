@@ -45,12 +45,16 @@ export const PATCH: APIRoute = async ({ request, cookies }) => {
   if (!owned) return Response.json({ error: "Blok nenalezen." }, { status: 404 });
 
   const date = new Date(`${parsed.data.date}T00:00:00`);
-  // Kolize (stejný klient už na cílovém dni) → starý smaž, zůstane jeden
-  await prisma.planningBlock.deleteMany({
+  // Kolize (stejný klient už na cílovém dni) → starý smaž, zůstane jeden.
+  // AUDIT 2026-07-31: id smazaného duplikátu vracíme, ať ho klient odstraní
+  // ze state (jinak na boardu strašil duch bloku do reloadu).
+  const duplicate = await prisma.planningBlock.findFirst({
     where: { userId: session.uid, date, clientKey: owned.clientKey, id: { not: owned.id } },
+    select: { id: true },
   });
+  if (duplicate) await prisma.planningBlock.delete({ where: { id: duplicate.id } });
   await prisma.planningBlock.update({ where: { id: owned.id }, data: { date } });
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, removedDuplicateId: duplicate?.id ?? null });
 };
 
 /** DELETE /api/planovani/blok?id=… — odstranění bloku */

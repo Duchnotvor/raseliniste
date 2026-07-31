@@ -92,6 +92,7 @@ export default function WeekTemplateEditor({ initialDays }: { initialDays: Templ
               <input
                 value={d.label ?? ""}
                 onChange={(e) => setDay(i, { label: e.target.value || null })}
+                maxLength={60}
                 placeholder="popisek (Radys, StoryMapa…)"
                 className="flex-1 min-w-[8rem] rounded-md border border-border bg-card px-2 py-1 text-xs"
               />

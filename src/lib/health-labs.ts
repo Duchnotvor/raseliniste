@@ -26,7 +26,12 @@ const resultSchema = z.object({
   ref_low: z.number().nullable().optional(),
   ref_high: z.number().nullable().optional(),
   ref_text: z.string().nullable().optional(),
-  flag: z.enum(["H", "L"]).nullable().optional(),
+  // AUDIT 2026-07-31: neznámý flag ("*", "HH", "N") nesmí shodit celou
+  // extrakci — normalizace na H/L/null
+  flag: z.preprocess(
+    (v) => (v === "H" || v === "L" ? v : null),
+    z.enum(["H", "L"]).nullable(),
+  ).optional(),
 });
 
 const extractionSchema = z.object({

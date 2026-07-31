@@ -112,8 +112,12 @@ export default function PageLinksSettings() {
 
   async function remove(id: string) {
     if (!confirm("Smazat tento odkaz?")) return;
-    setLinks((prev) => prev.filter((l) => l.id !== id));
-    await fetch(`/api/page-links/${id}`, { method: "DELETE" });
+    const prev = links;
+    setLinks((ls) => ls.filter((l) => l.id !== id));
+    // AUDIT 2026-07-31: při selhání DELETE vrátit zpět (dřív odkaz zmizel
+    // jen z UI a po reloadu se objevil znovu)
+    const res = await fetch(`/api/page-links/${id}`, { method: "DELETE" }).catch(() => null);
+    if (!res || !res.ok) setLinks(prev);
   }
 
   if (loading) {

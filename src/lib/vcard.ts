@@ -309,7 +309,17 @@ export function parseVCardFull(raw: string): VCardContact | null {
   contact.firstName = sanitize(contact.firstName);
   contact.lastName = sanitize(contact.lastName);
   if (contact.org) contact.org = sanitize(contact.org) || null;
-  if (contact.note) contact.note = sanitize(contact.note) || null;
+  // AUDIT FIX 2026-07-31: NOTE je víceřádkové pole — plná sanitize mazala
+  // \n a slepila odstavce ("radek1radek2"); s auto-pushem se to propsalo
+  // i na iCloud. Zachovat \n, strip jen \r/\t + entity, jako u adres.
+  if (contact.note) {
+    contact.note = contact.note
+      .replace(/&#1[03];/g, "")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/[\t]/g, " ").trimEnd())
+      .join("\n")
+      .trim() || null;
+  }
   // Adresy: NESMÍME zničit `\n` mezi ulice/město/země. Strip jen `\r`/`\t`
   // a `&#13;` zbytky uvnitř, trim okolní whitespace per řádek, odstranit
   // prázdné řádky.

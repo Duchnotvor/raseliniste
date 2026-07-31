@@ -57,7 +57,7 @@ export default function DigestSettings() {
     setPreview(null);
     setError(null);
     try {
-      const res = await fetch("/api/planovani/digest?nahled=1");
+      const res = await fetch(`/api/planovani/digest?nahled=1${contactId ? `&contactId=${encodeURIComponent(contactId)}` : ""}`);
       const d = await res.json();
       if (!res.ok) { setError(d.error ?? "Náhled selhal."); return; }
       setPreview(`${d.subject}\n\n${d.text}`);
