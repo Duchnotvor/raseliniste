@@ -323,6 +323,16 @@ export async function mergeContacts(
   await prisma.task.updateMany({ where: { assignedToContactId: { in: secondaryIds } }, data: { assignedToContactId: primaryId } });
 
   // 4) Update primary
+  // FIX 2026-08-01 (review nález — pravděpodobný root cause historického
+  // "auto-merge failed: <prázdno>"): icloudUid a googleResourceName jsou
+  // @unique. Pokud je primárka dědí ze secondary, musí se secondary NEJDŘÍV
+  // odpárovat — jinak update primárky hodí P2002 a celý merge spadne.
+  if (updates.icloudUid || updates.googleResourceName) {
+    await prisma.contact.updateMany({
+      where: { id: { in: secondaryIds }, userId },
+      data: { icloudUid: null, icloudEtag: null, icloudHref: null, googleResourceName: null },
+    });
+  }
   if (Object.keys(updates).length > 0) {
     await prisma.contact.update({ where: { id: primaryId }, data: updates });
   }

@@ -167,10 +167,22 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
     // Parse + dispatch (kontakt vs skupina)
     const contacts: Array<{ item: typeof fetched[number]; parsed: VCardContact }> = [];
     const groups: Array<{ item: typeof fetched[number]; parsed: VCardContact }> = [];
+    // FIX 2026-08-01 (review): UID karet, které se stáhly, ale neparsují
+    // (stub bez jména/telefonu/emailu). Jejich karta ŽIJE — musí se počítat
+    // do množiny živých UID, jinak by stub (a) trvale vypínal sweep mrtvých
+    // párování, (b) nechal svůj případně spárovaný kontakt ukrást/odpárovat.
+    const stubUids: string[] = [];
     for (const f of fetched) {
       if (!f.vcard) continue;
       const parsed = parseVCardFull(f.vcard);
-      if (!parsed) continue;
+      if (!parsed) {
+        const m = f.vcard.match(/^UID(?:;[^:\r\n]*)?:(.*)$/m);
+        if (m) {
+          const u = m[1].replace(/&#1[03];/g, "").replace(/[\u0000-\u001f]/g, "").trim();
+          if (u) stubUids.push(u);
+        }
+        continue;
+      }
       if (parsed.kind === "group") groups.push({ item: f, parsed });
       else contacts.push({ item: f, parsed });
     }
@@ -207,7 +219,10 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
     }
     const liveUids: Set<string> | null = pullIncomplete
       ? null
-      : new Set(contacts.map((c) => c.parsed.uid).filter((u): u is string => Boolean(u)));
+      : new Set([
+          ...contacts.map((c) => c.parsed.uid).filter((u): u is string => Boolean(u)),
+          ...stubUids,
+        ]);
 
     // 1) Upsert kontaktů — match podle telefonu / emailu / icloudUid
     let upsertedCount = 0;
@@ -260,13 +275,12 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
     // přeskakoval. Odpárovat (kontakt NEmazat — jen zrušit vazbu), pak ho
     // příští auto-merge normálně sloučí.
     //
-    // Bezpečnost: jen při KOMPLETNĚ naparsovaném pullu (každá položka má
-    // vCard i parse) — jinak by chybějící/stub karta odpárovala živý kontakt.
-    // Guard lastIcloudSyncAt < start pullu chrání kontakt spárovaný pushem
-    // během běhu pullu (race).
-    const fullyParsed = contacts.length + groups.length === items.length;
-    if (fullyParsed) {
-      const parsedUids = new Set<string>();
+    // Bezpečnost: jen při KOMPLETNĚ staženém pullu (fetch-úplnost; stub
+    // karty se počítají přes stubUids) — jinak by chybějící karta odpárovala
+    // živý kontakt. Guard lastIcloudSyncAt < start pullu chrání kontakt
+    // spárovaný pushem během běhu pullu (race).
+    if (!pullIncomplete) {
+      const parsedUids = new Set<string>(stubUids);
       for (const { parsed } of contacts) if (parsed.uid) parsedUids.add(parsed.uid);
       for (const { parsed } of groups) if (parsed.uid) parsedUids.add(parsed.uid);
       const paired = await prisma.contact.findMany({
