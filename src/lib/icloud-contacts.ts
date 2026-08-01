@@ -253,6 +253,36 @@ export async function pullIcloudContacts(userId: string): Promise<SyncStats> {
     // 3) Po skupinách: aktualizuj Contact.groups pole z ContactGroup.memberUids
     await refreshContactGroupsField(userId);
 
+    // 4) FIX 2026-08-01 (review nález #4): sweep mrtvých párování. Karta
+    // smazaná na iCloudu (např. Gideon ručně smaže duplicitní kartu na
+    // iPhonu) nechávala DB kontakt "spárovaný" navždy → hasIcloudCardConflict
+    // ho počítal jako živý konflikt a auto-merge cluster donekonečna
+    // přeskakoval. Odpárovat (kontakt NEmazat — jen zrušit vazbu), pak ho
+    // příští auto-merge normálně sloučí.
+    //
+    // Bezpečnost: jen při KOMPLETNĚ naparsovaném pullu (každá položka má
+    // vCard i parse) — jinak by chybějící/stub karta odpárovala živý kontakt.
+    // Guard lastIcloudSyncAt < start pullu chrání kontakt spárovaný pushem
+    // během běhu pullu (race).
+    const fullyParsed = contacts.length + groups.length === items.length;
+    if (fullyParsed) {
+      const parsedUids = new Set<string>();
+      for (const { parsed } of contacts) if (parsed.uid) parsedUids.add(parsed.uid);
+      for (const { parsed } of groups) if (parsed.uid) parsedUids.add(parsed.uid);
+      const paired = await prisma.contact.findMany({
+        where: { userId, icloudUid: { not: null }, lastIcloudSyncAt: { lt: new Date(start) } },
+        select: { id: true, icloudUid: true, displayName: true },
+      });
+      const dead = paired.filter((c) => c.icloudUid && !parsedUids.has(c.icloudUid));
+      if (dead.length > 0) {
+        await prisma.contact.updateMany({
+          where: { id: { in: dead.map((c) => c.id) }, userId },
+          data: { icloudUid: null, icloudEtag: null, icloudHref: null },
+        });
+        console.warn(`[icloud-sync] odpárováno ${dead.length} kontaktů s mrtvou iCloud kartou: ${dead.map((c) => c.displayName).join(", ")}`);
+      }
+    }
+
     await prisma.userIntegration.updateMany({
       where: { userId, provider: "icloud" },
       data: { lastUsedAt: new Date(), lastError: null },

@@ -247,7 +247,7 @@ export async function mergeContacts(
 
   // 1) Skalární doplnění
   const updates: Record<string, unknown> = {};
-  const fields: Array<keyof typeof primary> = ["firstName", "lastName", "company", "note", "birthYear", "birthMonth", "birthDay", "firstNameVocative", "greetingOverride", "icloudUid", "icloudEtag", "icloudHref", "googleResourceName"];
+  const fields: Array<keyof typeof primary> = ["firstName", "lastName", "company", "note", "birthYear", "birthMonth", "birthDay", "firstNameVocative", "greetingOverride", "googleResourceName"];
   for (const f of fields) {
     if (primary[f] == null || primary[f] === "") {
       for (const s of secondaries) {
@@ -256,6 +256,17 @@ export async function mergeContacts(
           break;
         }
       }
+    }
+  }
+  // FIX 2026-08-01 (review nález #5): iCloud trojice (uid/etag/href) se dědí
+  // ATOMICKY z JEDNÉ secondary — nezávislé doplnění mohlo smíchat uid z s1
+  // a href z s2 → push by pak přepsal cizí kartu.
+  if (!primary.icloudUid) {
+    const src = secondaries.find((s) => s.icloudUid);
+    if (src) {
+      updates.icloudUid = src.icloudUid;
+      updates.icloudEtag = src.icloudEtag;
+      updates.icloudHref = src.icloudHref;
     }
   }
   // Overlay flags — pokud sekundární má true, propagace
