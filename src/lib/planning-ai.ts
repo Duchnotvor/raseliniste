@@ -134,8 +134,9 @@ export async function proposeWeekPlan(userId: string, mondayKey: string): Promis
   }
 
   const template = await getWeekTemplate().catch(() => new Map<number, TemplateDay>());
-  const DAY_LABELS = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
-  const dayLines = Array.from({ length: 7 }, (_, i) => {
+  // Board je od 2026-08-01 Po–Pá (trencadís design) — víkend se neplánuje.
+  const DAY_LABELS = ["Po", "Út", "St", "Čt", "Pá"];
+  const dayLines = Array.from({ length: 5 }, (_, i) => {
     const d = new Date(monday); d.setDate(d.getDate() + i);
     const key = dkey(d);
     const tpl = template.get(i);
@@ -155,14 +156,14 @@ export async function proposeWeekPlan(userId: string, mondayKey: string): Promis
     : "";
 
   const prompt = `Jsi plánovací asistent pro kreativce s ADHD (Gideon, majitel studia).
-Navrhni, KTERÝ DEN v týdnu ${mondayKey} až ${dkey(new Date(nextMonday.getTime() - 86400000))} bude dělat které úkoly.
+Navrhni, KTERÝ DEN v pracovním týdnu ${mondayKey} až ${dkey(new Date(monday.getTime() + 4 * 86400000))} (Po–Pá) bude dělat které úkoly.
 
 PRAVIDLA (tvrdá):
 1. Max ${WIP_LIMIT} úkoly na den VČETNĚ už naplánovaných (viz kapacita dnů). Radši úkol nenaplánovat než přeplnit den.
 2. Dny, které už proběhly, nepoužívej.
 3. Batching: úkoly stejného projektu/klienta dávej na stejný den (přepínání kontextu je drahé).
 4. Úkoly s termínem naplánuj NEJPOZDĚJI na den termínu; s prioritou high co nejdřív.
-5. Dny s hodně schůzkami (>3 h) dostávají max 1 úkol. Víkend použij jen pro úkoly s víkendovým termínem.
+5. Dny s hodně schůzkami (>3 h) dostávají max 1 úkol. Víkend se NIKDY neplánuje — jen Po–Pá.
 6. Nenaplánované úkoly prostě vynech (zůstanou v backlogu) — nevymýšlej nové.
 ${templateRule}
 
@@ -188,7 +189,7 @@ Vrať POUZE JSON:
 
   const parsed = responseSchema.parse(extractJson(response.text ?? ""));
   const known = new Map(candidates.map((t) => [t.id, t.title]));
-  const weekKeys = new Set(Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(d.getDate() + i); return dkey(d); }));
+  const weekKeys = new Set(Array.from({ length: 5 }, (_, i) => { const d = new Date(monday); d.setDate(d.getDate() + i); return dkey(d); }));
 
   // Tvrdá validace + enforcement WIP limitu v kódu (AI je jen návrh)
   const perDay = new Map<string, number>(existingPerDay);

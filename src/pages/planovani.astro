@@ -1,12 +1,20 @@
 ---
 import Shell from "../layouts/Shell.astro";
-import { Icon } from "astro-icon/components";
-import PlanningBoard from "../components/PlanningBoard";
+import TrencadisBoard from "../components/TrencadisBoard";
 import WeekTemplateEditor from "../components/WeekTemplateEditor";
 import DigestSettings from "../components/DigestSettings";
 import { MODE_INFO, type DayMode } from "../lib/week-template";
 import { prisma } from "../lib/db";
 import { readSession } from "../lib/session";
+
+// Fonty trencadís designu (DESIGN/board_work) — jen na této stránce
+import "@fontsource/cormorant-garamond/600.css";
+import "@fontsource/cormorant-garamond/500-italic.css";
+import "@fontsource/barlow/400.css";
+import "@fontsource/barlow/500.css";
+import "@fontsource/barlow/600.css";
+import "@fontsource/barlow-semi-condensed/500.css";
+import "@fontsource/barlow-semi-condensed/600.css";
 
 const session = await readSession(Astro.cookies);
 if (!session) return Astro.redirect("/login");
@@ -31,7 +39,27 @@ prevMonday.setDate(prevMonday.getDate() - 7);
 const dkey = (d: Date) => d.toLocaleDateString("sv-SE");
 const todayKey = dkey(new Date());
 
-// Šablona týdne (F3) — badge na dnech
+// ISO číslo týdne (pro "Týden 31")
+function isoWeek(d: Date): number {
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = x.getUTCDay() || 7;
+  x.setUTCDate(x.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  return Math.ceil(((x.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+// "27.–31. července" (Po–Pá; při přesahu měsíce "29. července – 2. srpna")
+const MONTHS_GEN = ["ledna", "února", "března", "dubna", "května", "června", "července", "srpna", "září", "října", "listopadu", "prosince"];
+function weekRange(mon: Date): string {
+  const fri = new Date(mon);
+  fri.setDate(fri.getDate() + 4);
+  if (mon.getMonth() === fri.getMonth()) {
+    return `${mon.getDate()}.–${fri.getDate()}. ${MONTHS_GEN[mon.getMonth()]}`;
+  }
+  return `${mon.getDate()}. ${MONTHS_GEN[mon.getMonth()]} – ${fri.getDate()}. ${MONTHS_GEN[fri.getMonth()]}`;
+}
+
+// Šablona týdne (F3) — režim dne do meta řádku sloupce
 const templateRows = await prisma.planningDayTemplate.findMany({
   where: { userId: session.uid },
   orderBy: { weekday: "asc" },
@@ -39,7 +67,7 @@ const templateRows = await prisma.planningDayTemplate.findMany({
 });
 const templateByDay = new Map(templateRows.map((r) => [r.weekday, r]));
 
-// Schůzky týdne — do hlavičky každého dne (plánuje se KOLEM nich)
+// Schůzky týdne — do meta řádku dne (plánuje se KOLEM nich)
 const weekEvents = await prisma.calendarEvent.findMany({
   where: {
     deletedRemotely: false,
@@ -61,9 +89,9 @@ for (const e of weekEvents) {
   busyByDay.set(key, (busyByDay.get(key) ?? 0) + (e.endsAt.getTime() - e.startsAt.getTime()) / 3_600_000);
 }
 
-const DAY_SHORT = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
-const DAY_FULL = ["Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek", "Sobota", "Neděle"];
-const days = Array.from({ length: 7 }, (_, i) => {
+// Board je Po–Pá (trencadís design; víkendové plánování zmigrováno na pátek)
+const DAY_FULL = ["Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek"];
+const days = Array.from({ length: 5 }, (_, i) => {
   const d = new Date(monday);
   d.setDate(d.getDate() + i);
   const key = dkey(d);
@@ -71,12 +99,11 @@ const days = Array.from({ length: 7 }, (_, i) => {
   const info = tpl ? MODE_INFO[tpl.mode as DayMode] : null;
   return {
     date: key,
-    label: `${DAY_SHORT[i]} ${d.getDate()}.${d.getMonth() + 1}.`,
     dayName: DAY_FULL[i],
+    dateLabel: `${d.getDate()}. ${d.getMonth() + 1}.`,
     isToday: key === todayKey,
     isPast: key < todayKey,
     modeName: info?.name ?? null,
-    modeTint: info?.tint ?? null,
     modeLabel: tpl?.label ?? null,
     meetings: meetingsByDay.get(key) ?? [],
     busyHours: busyByDay.get(key) ?? 0,
@@ -85,7 +112,7 @@ const days = Array.from({ length: 7 }, (_, i) => {
 
 // ---------------------------------------------------------------------------
 // KURÁTOROVANÝ výběr (Gideon 2026-07-23: 1450 úkolů na hromadě = k ničemu).
-// „K naplánování" = otevřené nenaplánované úkoly, které jsou AKTUÁLNÍ:
+// „Volné střepy" = otevřené nenaplánované úkoly, které jsou AKTUÁLNÍ:
 // termín do 14 dnů NEBO vysoká priorita. Zbytek žije dál v Todoistu.
 // ---------------------------------------------------------------------------
 const horizon = new Date(); horizon.setDate(horizon.getDate() + 14); horizon.setHours(23, 59, 59, 999);
@@ -101,13 +128,12 @@ const candidateWhere = {
   OR: [{ dueAt: { lte: horizon } }, { priority: "high" as const }],
 };
 
-const [weekTasks, overdueTasks, candidateTasks, candidateTotal] = await Promise.all([
+const [weekTasks, overdueTasks, candidateTasks, candidateTotal, prevWeekTotal, nextWeekTotal] = await Promise.all([
   prisma.task.findMany({
     where: { userId: session.uid, status: "open", plannedFor: { gte: monday, lt: nextMonday } },
     select: taskSelect,
   }),
-  // AUDIT 2026-07-31: „z minula" = před dneškem, ne před zobrazeným týdnem —
-  // při prohlížení budoucího týdne se jinak aktuální týden tvářil jako přeteklý
+  // „z minula" = před dneškem, ne před zobrazeným týdnem (audit 2026-07-31)
   prisma.task.findMany({
     where: {
       userId: session.uid, status: "open",
@@ -124,6 +150,8 @@ const [weekTasks, overdueTasks, candidateTasks, candidateTotal] = await Promise.
     take: 150,
   }),
   prisma.task.count({ where: candidateWhere }),
+  prisma.task.count({ where: { userId: session.uid, status: "open", plannedFor: { gte: prevMonday, lt: monday } } }),
+  prisma.task.count({ where: { userId: session.uid, status: "open", plannedFor: { gte: nextMonday, lt: new Date(nextMonday.getTime() + 7 * 86400000) } } }),
 ]);
 
 // Klientské bloky týdne (kontejnery)
@@ -141,9 +169,7 @@ const projects = await prisma.todoistProjectMirror.findMany({
 });
 const projectNames = new Map(projects.map((p) => [p.todoistId, p.name]));
 
-// Klient/skupina úkolu — stejná sémantika jako smart routing:
-// tag klient-<slug> → slug; kontakt.clientTag; týmový kontakt → jméno;
-// jinak Todoist projekt; jinak „Ostatní".
+// Klient/skupina úkolu — stejná sémantika jako smart routing
 function clientLabel(t: (typeof candidateTasks)[number]): string {
   const klientTag = t.tags.find((x) => x.startsWith("klient-"));
   if (klientTag) {
@@ -175,8 +201,15 @@ const initialCards = [
   ...candidateTasks.map((t) => toCard(t)),
 ];
 
-const fmtRange = `${monday.getDate()}. ${monday.getMonth() + 1}. – ${new Date(nextMonday.getTime() - 86400000).getDate()}. ${new Date(nextMonday.getTime() - 86400000).getMonth() + 1}.`;
+const weekTotal = weekTasks.length;
+const weekTabs = [
+  { label: `Týden ${isoWeek(prevMonday)}`, range: weekRange(prevMonday), total: prevWeekTotal, href: `/planovani?w=${dkey(prevMonday)}`, active: false },
+  { label: `Týden ${isoWeek(monday)}`, range: weekRange(monday), total: weekTotal, href: `/planovani?w=${dkey(monday)}`, active: true },
+  { label: `Týden ${isoWeek(nextMonday)}`, range: weekRange(nextMonday), total: nextWeekTotal, href: `/planovani?w=${dkey(nextMonday)}`, active: false },
+];
+
 const currentMondayKey = dkey(new Date(new Date().setDate(new Date().getDate() - ((new Date().getDay() + 6) % 7))));
+const isCurrentWeek = dkey(monday) === currentMondayKey;
 ---
 
 <Shell
@@ -184,27 +217,40 @@ const currentMondayKey = dkey(new Date(new Date().setDate(new Date().getDate() -
   username={user.username}
   breadcrumb={[{ label: "Organizace" }, { label: "Plánování" }]}
 >
-  <div class="space-y-4">
-    <div class="flex items-end justify-between gap-4 flex-wrap">
-      <div>
-        <h1 class="font-serif text-[2.25rem] leading-tight">Plánování týdne</h1>
-        <p class="text-sm text-muted-foreground mt-1">
-          Přetáhni na den <strong>celého klienta</strong> (hlavičku skupiny) = blok s jeho úkoly,
-          nebo jednotlivé úkoly. Vlevo jen aktuální věci (termín do 14 dnů / vysoká priorita). Max 3 na den.
-        </p>
+  <div class="space-y-3">
+    {/* Parchment panel — trencadís canvas (DESIGN/board_work) */}
+    <div class="trc-canvas rounded-[14px] px-4 py-5 lg:px-10 lg:pt-7 lg:pb-9" style="background: #EFE7D6; color: #2A241C;">
+      {/* Header dle návrhu */}
+      <div class="flex items-end justify-between flex-wrap" style="gap: 24px; margin-bottom: 16px;">
+        <div style="min-width: 0;">
+          <div style="font-family: 'Barlow Semi Condensed', sans-serif; letter-spacing: 0.42em; text-transform: uppercase; font-size: 12px; color: #C1553A; font-weight: 600; margin-bottom: 10px;">Dílna trencadís · Kanban</div>
+          <h1 style="font-family: 'Cormorant Garamond', serif; font-weight: 600; font-size: 46px; line-height: 1.1; margin: 0; color: #17403f; white-space: nowrap;">Nástěnka <span style="font-style: italic; color: #C1553A;">mozaiky</span></h1>
+          <div style="font-family: 'Barlow', sans-serif; font-size: 14px; color: #5c5344; margin-top: 6px;">Týdenní plán dílny — pondělí až pátek</div>
+        </div>
+        <div class="flex items-center flex-wrap" style="gap: 12px;">
+          {!isCurrentWeek && (
+            <a href="/planovani" style="font-family: 'Barlow Semi Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; font-weight: 600; color: #17789E; padding: 10px 6px;">Dnes</a>
+          )}
+          <button
+            type="button"
+            id="trc-fullscreen"
+            class="hidden lg:block"
+            style="font-family: 'Barlow Semi Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; font-weight: 600; color: #5c5344; padding: 10px 16px; border: 1px solid rgba(42,36,28,0.22); border-radius: 4px; background: none; cursor: pointer;"
+          >⛶ Na celou šířku</button>
+        </div>
       </div>
-      <div class="flex items-center gap-2">
-        <a href={`/planovani?w=${dkey(prevMonday)}`} class="glass-subtle rounded-md p-2 hover:bg-white/10" title="Předchozí týden">
-          <Icon name="lucide:chevron-left" class="size-4" />
-        </a>
-        <span class="font-mono text-sm tabular">{fmtRange}</span>
-        <a href={`/planovani?w=${dkey(nextMonday)}`} class="glass-subtle rounded-md p-2 hover:bg-white/10" title="Další týden">
-          <Icon name="lucide:chevron-right" class="size-4" />
-        </a>
-        {dkey(monday) !== currentMondayKey && (
-          <a href="/planovani" class="text-xs font-mono text-[var(--tint-sky)] hover:underline ml-1">dnes</a>
-        )}
-      </div>
+
+      <TrencadisBoard
+        client:load
+        weekStart={dkey(monday)}
+        days={days}
+        initialCards={initialCards}
+        initialBlocks={initialBlocks}
+        backlogTotal={candidateTotal}
+        weekTabs={weekTabs}
+        prevHref={`/planovani?w=${dkey(prevMonday)}`}
+        nextHref={`/planovani?w=${dkey(nextMonday)}`}
+      />
     </div>
 
     <WeekTemplateEditor
@@ -212,16 +258,22 @@ const currentMondayKey = dkey(new Date(new Date().setDate(new Date().getDate() -
       initialDays={templateRows.map((r) => ({ weekday: r.weekday, mode: r.mode as DayMode, label: r.label }))}
     />
     <DigestSettings client:load />
-
-    <div class="glass rounded-xl p-3">
-      <PlanningBoard
-        client:load
-        weekStart={dkey(monday)}
-        days={days}
-        initialCards={initialCards}
-        initialBlocks={initialBlocks}
-        backlogTotal={candidateTotal}
-      />
-    </div>
   </div>
+
+  <script>
+    // „Na celou šířku" = sbalit sidebar. Deleguje na existující SidebarToggle
+    // (klik na jeho tlačítko) — jeho React stav, localStorage i atributy
+    // zůstanou konzistentní. Label se synchronizuje z data-shell atributu.
+    const btn = document.getElementById("trc-fullscreen");
+    const shell = document.querySelector("[data-shell]");
+    function syncLabel() {
+      const collapsed = shell?.getAttribute("data-sidebar-collapsed") === "true";
+      if (btn) btn.textContent = collapsed ? "⛶ Zpět do okna" : "⛶ Na celou šířku";
+    }
+    btn?.addEventListener("click", () => {
+      (document.querySelector("[data-sidebar-toggle]") as HTMLElement | null)?.click();
+    });
+    if (shell) new MutationObserver(syncLabel).observe(shell, { attributes: true, attributeFilter: ["data-sidebar-collapsed"] });
+    syncLabel();
+  </script>
 </Shell>
