@@ -33,6 +33,13 @@ const templateRows = await prisma.planningDayTemplate.findMany({
   orderBy: { weekday: "asc" },
   select: { weekday: true, mode: true, label: true },
 });
+
+// Existuje aktivní sdílení? → zobrazit tlačítko „Zrušit sdílení"
+const planningSettings = await prisma.planningSettings.findUnique({
+  where: { userId: session.uid },
+  select: { shareToken: true },
+});
+const hasShare = Boolean(planningSettings?.shareToken);
 ---
 
 <Shell
@@ -59,6 +66,13 @@ const templateRows = await prisma.planningDayTemplate.findMany({
             id="trc-share"
             style="font-family: 'Barlow Semi Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; font-weight: 600; color: #5c5344; padding: 10px 16px; border: 1px solid rgba(42,36,28,0.22); border-radius: 4px; background: none; cursor: pointer;"
           >⎘ Sdílet</button>
+          <button
+            type="button"
+            id="trc-unshare"
+            class={hasShare ? "" : "hidden"}
+            title="Zneplatní odkaz pro kolegyni — stránka /b/… přestane fungovat"
+            style="font-family: 'Barlow Semi Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; font-weight: 600; color: #A8412C; padding: 10px 16px; border: 1px solid rgba(168,65,44,0.35); border-radius: 4px; background: none; cursor: pointer;"
+          >✕ Zrušit sdílení</button>
           <button
             type="button"
             id="trc-fullscreen"
@@ -107,6 +121,7 @@ const templateRows = await prisma.planningDayTemplate.findMany({
     // „Sdílet" — vygeneruje (nebo vrátí existující) read-only link pro
     // kolegyni a zkopíruje ho do schránky.
     const shareBtn = document.getElementById("trc-share");
+    const unshareBtn = document.getElementById("trc-unshare");
     shareBtn?.addEventListener("click", async () => {
       shareBtn.textContent = "⎘ Vytvářím…";
       try {
@@ -115,11 +130,24 @@ const templateRows = await prisma.planningDayTemplate.findMany({
         if (!res.ok || !d.url) throw new Error(d.error ?? "Nepodařilo se");
         await navigator.clipboard.writeText(d.url).catch(() => null);
         shareBtn.textContent = "✓ Odkaz zkopírován";
+        unshareBtn?.classList.remove("hidden");
         window.prompt("Read-only odkaz pro kolegyni (zkopírován do schránky):", d.url);
       } catch {
         shareBtn.textContent = "⎘ Sdílet — chyba";
       } finally {
         setTimeout(() => { shareBtn.textContent = "⎘ Sdílet"; }, 4000);
+      }
+    });
+
+    // „Zrušit sdílení" — zneplatní token; příští Sdílet vygeneruje NOVÝ odkaz.
+    unshareBtn?.addEventListener("click", async () => {
+      if (!confirm("Zrušit sdílení? Odkaz, který má kolegyně, přestane fungovat.")) return;
+      const res = await fetch("/api/planovani/sdileni", { method: "DELETE" }).catch(() => null);
+      if (res?.ok) {
+        unshareBtn.classList.add("hidden");
+      } else {
+        unshareBtn.textContent = "✕ Zrušení selhalo";
+        setTimeout(() => { unshareBtn.textContent = "✕ Zrušit sdílení"; }, 4000);
       }
     });
   </script>
