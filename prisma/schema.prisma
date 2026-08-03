@@ -1159,6 +1159,9 @@ model PlanningSettings {
   digestEnabled   Boolean  @default(false)
   digestContactId String?  // Contact (isTeam) — příjemce denního digestu
   digestContact   Contact? @relation(fields: [digestContactId], references: [id])
+
+  // Gideon 2026-08-04: read-only sdílení boardu pro kolegyni — /b/<token>
+  shareToken      String?  @unique
 }
 
 // Klientský blok na plánovacím boardu (Petr 2026-07-24) — kontejner

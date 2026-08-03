@@ -1,0 +1,71 @@
+---
+import Base from "../../layouts/Base.astro";
+import TrencadisBoard from "../../components/TrencadisBoard";
+import { buildPlanningBoardData } from "../../lib/planning-board-data";
+import { prisma } from "../../lib/db";
+
+// Fonty trencadís designu
+import "@fontsource/cormorant-garamond/600.css";
+import "@fontsource/cormorant-garamond/500-italic.css";
+import "@fontsource/barlow/400.css";
+import "@fontsource/barlow/500.css";
+import "@fontsource/barlow/600.css";
+import "@fontsource/barlow-semi-condensed/500.css";
+import "@fontsource/barlow-semi-condensed/600.css";
+
+export const prerender = false;
+
+/**
+ * Veřejná read-only nástěnka pro kolegyni (Gideon 2026-08-04).
+ * Autorizace: token v URL (PlanningSettings.shareToken, generuje tlačítko
+ * „Sdílet" na /planovani). Cesta /b/ je public v middleware.ts — POZOR,
+ * nový public endpoint MUSÍ být v isPublic() (lekce ClaudeClaw 2026-07-05).
+ * Žádné mutace: board jede v readOnly režimu (bez drag&drop/AI/hotovo).
+ */
+
+const token = Astro.params.token ?? "";
+const settings = token.length >= 16
+  ? await prisma.planningSettings.findUnique({
+      where: { shareToken: token },
+      select: { userId: true },
+    })
+  : null;
+
+if (!settings) {
+  return new Response("Odkaz není platný nebo byl odvolán.", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+}
+
+const data = await buildPlanningBoardData(settings.userId, Astro.url.searchParams.get("w"), `/b/${token}`);
+---
+
+<Base title="Nástěnka mozaiky · Rašeliniště">
+  <div style="min-height: 100vh; background: #EFE7D6; color: #2A241C; font-family: 'Barlow', sans-serif;">
+    <div style="padding: 30px 40px 36px; max-width: 1720px; margin: 0 auto;">
+      {/* Header dle návrhu (bez ovládacích tlačítek) */}
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 16px;">
+        <div style="min-width: 0;">
+          <div style="font-family: 'Barlow Semi Condensed', sans-serif; letter-spacing: 0.42em; text-transform: uppercase; font-size: 12px; color: #C1553A; font-weight: 600; margin-bottom: 10px;">Dílna trencadís · Kanban</div>
+          <h1 style="font-family: 'Cormorant Garamond', serif; font-weight: 600; font-size: 46px; line-height: 1.1; margin: 0; color: #17403f; white-space: nowrap;">Nástěnka <span style="font-style: italic; color: #C1553A;">mozaiky</span></h1>
+          <div style="font-family: 'Barlow', sans-serif; font-size: 14px; color: #5c5344; margin-top: 6px;">Týdenní plán dílny — pondělí až pátek · jen ke čtení</div>
+        </div>
+        {!data.isCurrentWeek && (
+          <a href={`/b/${token}`} style="font-family: 'Barlow Semi Condensed', sans-serif; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; font-weight: 600; color: #17789E; padding: 10px 16px; border: 1px solid rgba(42,36,28,0.22); border-radius: 4px; text-decoration: none;">Dnes</a>
+        )}
+      </div>
+
+      <TrencadisBoard
+        client:load
+        readOnly
+        weekStart={data.weekStart}
+        days={data.days}
+        initialCards={data.initialCards}
+        initialBlocks={data.initialBlocks}
+        backlogTotal={data.backlogTotal}
+        clientTotals={data.clientTotals}
+        weekTabs={data.weekTabs}
+        prevHref={data.prevHref}
+        nextHref={data.nextHref}
+      />
+    </div>
+  </div>
+</Base>

@@ -38,6 +38,9 @@ function isPublic(pathname: string): boolean {
   // dostal k webhook kódu — Petr 2026-07-05 hodinu debugoval secret,
   // který byl celou dobu správně.
   if (pathname === "/api/telegram/webhook") return true;
+  // Read-only trencadís board pro kolegyni — autorizace přes shareToken v URL
+  // (PlanningSettings.shareToken, stránka sama vrací 404 na neplatný token).
+  if (pathname.startsWith("/b/")) return true;
   // Studna — pozvánkové linky pro hosty (autorizace přes guestToken v URL).
   if (pathname.startsWith("/me/")) return true;
   if (pathname.startsWith("/api/me/")) return true;

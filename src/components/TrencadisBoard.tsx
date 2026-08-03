@@ -152,15 +152,20 @@ interface Props {
   initialCards: PlanCard[];
   initialBlocks: PlanBlock[];
   backlogTotal: number;
+  /** Celkové počty otevřených úkolů per klient (i mimo kurátorovaný výběr) */
+  clientTotals: Record<string, number>;
   weekTabs: WeekTab[];
   prevHref: string;
   nextHref: string;
+  /** Veřejný read-only režim (/b/<token> pro kolegyni) — bez drag&drop,
+   *  dokončování, AI a mazání; jen prohlížení + week navigace. */
+  readOnly?: boolean;
 }
 
 const WIP_LIMIT = 3;
 const PRIO_ORDER = ["high", "normal", "low"];
 
-export default function TrencadisBoard({ weekStart, days, initialCards, initialBlocks, backlogTotal, weekTabs, prevHref, nextHref }: Props) {
+export default function TrencadisBoard({ weekStart, days, initialCards, initialBlocks, backlogTotal, clientTotals, weekTabs, prevHref, nextHref, readOnly = false }: Props) {
   const [cards, setCards] = useState<PlanCard[]>(initialCards);
   const [blocks, setBlocks] = useState<PlanBlock[]>(initialBlocks);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -341,12 +346,12 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
     const hex = soft(colorFor(c.projectName ?? "Ostatní"));
     return (
       <div
-        draggable
-        onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); }}
+        draggable={!readOnly}
+        onDragStart={(e) => { if (readOnly) return; setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); }}
         onDragEnd={onDragEnd}
         style={{
           display: "flex", alignItems: "center", gap: 9, background: "rgba(255,252,244,0.72)",
-          borderRadius: s.radius, transform: `rotate(${s.rot})`, padding: "7px 12px", cursor: "grab",
+          borderRadius: s.radius, transform: `rotate(${s.rot})`, padding: "7px 12px", cursor: readOnly ? "default" : "grab",
           boxShadow: "inset 0 0 0 1px rgba(74,58,36,0.14)", opacity: dragId === c.id ? 0.45 : 1,
         }}
       >
@@ -370,8 +375,8 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
     return (
       <button
         type="button"
-        draggable
-        onDragStart={(e) => { setDragGroup(name); e.dataTransfer.effectAllowed = "copy"; }}
+        draggable={!readOnly}
+        onDragStart={(e) => { if (readOnly) return; setDragGroup(name); e.dataTransfer.effectAllowed = "copy"; }}
         onDragEnd={onDragEnd}
         onClick={() => setExpanded((s2) => { const n = new Set(s2); if (n.has(name)) n.delete(name); else n.add(name); return n; })}
         title="Klik = rozbalit úkoly · přetáhni na den = blok pro celého klienta"
@@ -384,8 +389,15 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
       >
         <span style={{ flex: "0 0 auto", width: 9, height: 9, borderRadius: "2px 1px 3px 1px", background: hex }} />
         <span style={{ fontFamily: F_BARLOW, fontWeight: 600, fontSize: 13.5, color: "#3A3226" }}>{name}</span>
-        <span style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 10, fontWeight: 600, color: "#948a79" }}>
-          {count} {plural(count, "úkol", "úkoly", "úkolů")}
+        {/* Gideon 2026-08-04: „1 úkol" mátlo vs. počet v Todoistu → „1 z 11"
+            (aktuální k naplánování z celkových otevřených úkolů klienta) */}
+        <span
+          title={`${count} aktuálních k naplánování (termín do 14 dnů / vysoká priorita) z ${clientTotals[name] ?? count} otevřených úkolů klienta — zbytek je v Todoistu`}
+          style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 10, fontWeight: 600, color: "#948a79" }}
+        >
+          {(clientTotals[name] ?? count) > count
+            ? `${count} z ${clientTotals[name]} ${plural(clientTotals[name], "úkolu", "úkolů", "úkolů")}`
+            : `${count} ${plural(count, "úkol", "úkoly", "úkolů")}`}
         </span>
       </button>
     );
@@ -399,14 +411,14 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
     const dueLate = c.dueAt && c.plannedFor && new Date(c.dueAt) < new Date(`${c.plannedFor}T00:00:00`);
     return (
       <div
-        draggable
-        onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); }}
+        draggable={!readOnly}
+        onDragStart={(e) => { if (readOnly) return; setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); }}
         onDragEnd={onDragEnd}
         style={{
           backgroundColor: hex, backgroundImage: GLAZE_CARD, borderRadius: s.radius,
           transform: `rotate(${s.rot})`, padding: "13px 14px 12px",
           boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.12), 0 5px 12px -10px rgba(42,36,28,0.45)",
-          cursor: "grab", opacity: dragId === c.id ? 0.45 : 1,
+          cursor: readOnly ? "default" : "grab", opacity: dragId === c.id ? 0.45 : 1,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "5px 6px", marginBottom: 9 }}>
@@ -424,7 +436,7 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
           <span style={{ fontFamily: F_BARLOW, fontSize: 11.5, color: dueLate ? "#A8412C" : mCol, fontWeight: dueLate ? 600 : 400 }}>
             {c.dueAt ? fmtDue(c.dueAt) : ""}
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {!readOnly && <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <select
               value=""
               onChange={(e) => { if (e.target.value) move(c.id, e.target.value === "tray" ? null : e.target.value); }}
@@ -446,7 +458,7 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
                 justifyContent: "center", boxShadow: "inset 0 0 0 1.5px rgba(255,252,244,0.5)", border: "none", cursor: "pointer",
               }}
             >✓</button>
-          </span>
+          </span>}
         </div>
       </div>
     );
@@ -463,22 +475,22 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
       .slice(0, 6);
     return (
       <div
-        draggable
-        onDragStart={(e) => { setDragBlockId(b.id); e.dataTransfer.effectAllowed = "move"; }}
+        draggable={!readOnly}
+        onDragStart={(e) => { if (readOnly) return; setDragBlockId(b.id); e.dataTransfer.effectAllowed = "move"; }}
         onDragEnd={onDragEnd}
         style={{
           backgroundColor: hex, backgroundImage: GLAZE_CARD, borderRadius: s.radius,
           transform: `rotate(${s.rot})`, padding: "13px 14px 12px",
           boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.12), 0 5px 12px -10px rgba(42,36,28,0.45)",
-          cursor: "grab", opacity: dragBlockId === b.id ? 0.45 : 1,
+          cursor: readOnly ? "default" : "grab", opacity: dragBlockId === b.id ? 0.45 : 1,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 9 }}>
           <span style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10.5, fontWeight: 600, color: "#2A241C", background: "rgba(255,252,244,0.92)", borderRadius: 4, padding: "2px 8px" }}>blok</span>
-          <button
+          {!readOnly && <button
             type="button" onClick={() => removeBlock(b.id)} title="Zrušit blok"
             style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: mCol, fontSize: 13, lineHeight: 1, padding: 2 }}
-          >×</button>
+          >×</button>}
         </div>
         <div style={{ fontFamily: F_BARLOW, fontWeight: 600, fontSize: 15, lineHeight: 1.28, color: tCol }}>{b.label}</div>
         {blockTasks.length > 0 ? (
@@ -620,17 +632,17 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
       >
         <div style={{ flex: "0 0 auto", maxWidth: 200 }}>
           <div style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.16em", fontSize: 12, fontWeight: 600, color: "#17403f" }}>Volné střepy</div>
-          <div style={{ fontFamily: F_BARLOW, fontSize: 12, color: "#6b6153", marginTop: 3 }}>Přetáhni je do dne v týdnu</div>
+          <div style={{ fontFamily: F_BARLOW, fontSize: 12, color: "#6b6153", marginTop: 3 }}>{readOnly ? "Čeká na naplánování" : "Přetáhni je do dne v týdnu"}</div>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Hledat…"
             style={{ marginTop: 7, width: "100%", fontFamily: F_BARLOW, fontSize: 12.5, background: "rgba(255,252,244,0.72)", border: "1px solid rgba(74,58,36,0.2)", borderRadius: "6px 4px 7px 4px", padding: "5px 8px", color: "#2A241C" }}
           />
-          <button
+          {!readOnly && <button
             type="button" onClick={askAi} disabled={aiBusy}
             style={{ marginTop: 7, fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 11, fontWeight: 600, color: "#C1553A", background: "rgba(255,252,244,0.72)", border: "1px solid rgba(193,85,58,0.4)", borderRadius: "7px 5px 8px 5px", padding: "6px 10px", cursor: "pointer", opacity: aiBusy ? 0.6 : 1 }}
-          >{aiBusy ? "Skládám návrh…" : "✦ Navrhnout týden (AI)"}</button>
+          >{aiBusy ? "Skládám návrh…" : "✦ Navrhnout týden (AI)"}</button>}
         </div>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           {backlogGroups.overdue.map((c) => <Chip key={c.id} c={c} />)}
@@ -712,9 +724,14 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
               <div style={{ display: "flex", flexDirection: "column", gap: 9, padding: "9px 11px 13px" }}>
                 {blocksIn.map((b) => <BlockCard key={b.id} b={b} />)}
                 {cardsIn.map((c) => <Card key={c.id} c={c} />)}
-                <div style={{ border: "1.5px dashed rgba(74,58,36,0.4)", borderRadius: "10px 7px 11px 8px", padding: 10, textAlign: "center", fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 11.5, fontWeight: 600, color: "rgba(74,58,36,0.6)" }}>
-                  {isOver ? "↓ pusť střep sem" : "+ přetáhni střep"}
-                </div>
+                {!readOnly && (
+                  <div style={{ border: "1.5px dashed rgba(74,58,36,0.4)", borderRadius: "10px 7px 11px 8px", padding: 10, textAlign: "center", fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 11.5, fontWeight: 600, color: "rgba(74,58,36,0.6)" }}>
+                    {isOver ? "↓ pusť střep sem" : "+ přetáhni střep"}
+                  </div>
+                )}
+                {readOnly && count === 0 && (
+                  <div style={{ padding: "6px 2px", textAlign: "center", fontFamily: F_BARLOW, fontSize: 12, fontStyle: "italic", color: "rgba(74,58,36,0.5)" }}>nic naplánováno</div>
+                )}
               </div>
             </div>
           );
