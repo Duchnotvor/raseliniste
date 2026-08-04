@@ -54,6 +54,48 @@ interface CalendarEvent {
   prepNote: string | null;
   itemsToBring: unknown;
   allDay: boolean;
+  blocksBooking?: boolean | null;
+}
+
+/**
+ * Přepínač blokování bookingu (Gideon 2026-08-04: „přepínač tam žádný
+ * nevidím" — byl jen v /dnes DayView, ne v kalendářovém detailu dne).
+ * 3 stavy: auto → neblokuje → blokuje. Jen reálné události.
+ */
+export function BlocksToggle({ event }: { event: { id: string; blocksBooking?: boolean | null } }) {
+  const [blocks, setBlocks] = useState<boolean | null | undefined>(event.blocksBooking);
+  const [busy, setBusy] = useState(false);
+  async function cycle() {
+    const next = blocks === null || blocks === undefined ? false : blocks === false ? true : null;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/calendar/events/${event.id}/blocking`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ blocks: next }),
+      });
+      if (res.ok) setBlocks(next);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const label = blocks === false ? "neblokuje" : blocks === true ? "blokuje" : "auto";
+  const color = blocks === true ? "var(--c-signal)" : blocks === false ? "var(--tint-sage)" : "var(--muted-foreground)";
+  return (
+    <div className="flex items-center justify-between gap-2 pt-2 mt-2 border-t border-[var(--border)]">
+      <span className="text-xs text-muted-foreground">Blokuje nabídku schůzek (booking)</span>
+      <button
+        type="button"
+        onClick={cycle}
+        disabled={busy}
+        title="Klikáním přepínáš: auto → neblokuje → blokuje"
+        className="text-xs font-mono uppercase tracking-wider px-2.5 py-1 rounded-md border"
+        style={{ color, borderColor: `color-mix(in oklch, ${color} 45%, transparent)`, opacity: busy ? 0.5 : 1 }}
+      >
+        {label}
+      </button>
+    </div>
+  );
 }
 
 // ----- Barva podle ZDROJE (ne typu) -----
@@ -687,25 +729,23 @@ export default function DayTimeline({
           <div
             className="modal-overlay"
             onClick={() => setOpenId(null)}
-            style={{ background: "oklch(8% 0.02 260 / 0.55)", backdropFilter: "blur(8px)" }}
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-5 space-y-2 text-sm shadow-2xl"
+              className="modal-panel w-full sm:max-w-md max-h-[85vh] overflow-y-auto p-5 space-y-2 text-sm"
               style={{
-                background: "oklch(14% 0.025 260 / 0.98)",
-                border: `1px solid color-mix(in oklch, var(--tint-${tint}) 35%, transparent)`,
+                // FIX 2026-08-04 (Gideon: „nejde to přečíst"): dřív hardcoded
+                // tmavý panel + text míchaný s white — v light theme nečitelné.
+                // modal-panel je theme-aware; tint jen v borderu a akcentech.
+                borderColor: `color-mix(in oklch, var(--tint-${tint}) 40%, var(--border))`,
               }}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-xs font-mono tabular font-semibold mb-0.5" style={{ color: `color-mix(in oklch, var(--tint-${tint}) 90%, white)` }}>
+                  <div className="text-xs font-mono tabular font-semibold mb-0.5" style={{ color: `color-mix(in oklch, var(--tint-${tint}) 60%, var(--foreground))` }}>
                     {ev.allDay ? "celý den" : `${fmtTime(start)}–${fmtTime(end)}`}
                   </div>
-                  <h3
-                    className="font-serif text-lg leading-tight"
-                    style={{ color: `color-mix(in oklch, var(--tint-${tint}) 96%, white)` }}
-                  >
+                  <h3 className="font-serif text-lg leading-tight text-foreground">
                     {ev.title}
                   </h3>
                 </div>
@@ -762,6 +802,9 @@ export default function DayTimeline({
                     <p className="text-xs text-muted-foreground/90 whitespace-pre-wrap mt-2 leading-relaxed">
                       {ev.description}
                     </p>
+                  )}
+                  {ev.source !== "RITUAL" && ev.source !== "ANNIVERSARY" && (
+                    <BlocksToggle key={ev.id} event={ev} />
                   )}
                 </>
               )}

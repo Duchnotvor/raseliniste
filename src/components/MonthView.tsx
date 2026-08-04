@@ -360,10 +360,9 @@ export default function MonthView({
             animation: "fadeIn 120ms ease-out",
           }}
         >
-          <div
-            className="glass-strong rounded-lg p-3 shadow-2xl border border-white/15"
-            style={{ background: "oklch(14% 0.025 260 / 0.92)" }}
-          >
+          <div className="modal-panel rounded-lg p-3">
+            {/* FIX 2026-08-04: hardcoded tmavé pozadí + text míchaný s white
+                bylo v light theme nečitelné — modal-panel je theme-aware */}
             <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
               {formatLongDate(hoveredCell.date)}
             </div>
@@ -385,7 +384,7 @@ export default function MonthView({
                       <span
                         className="font-mono tabular text-[10px] shrink-0 w-12 mt-px"
                         style={{
-                          color: `color-mix(in oklch, var(--tint-${tint}) 80%, white)`,
+                          color: `color-mix(in oklch, var(--tint-${tint}) 55%, var(--foreground))`,
                         }}
                       >
                         {ev.allDay
@@ -395,7 +394,7 @@ export default function MonthView({
                       <span
                         className="flex-1"
                         style={{
-                          color: `color-mix(in oklch, var(--tint-${tint}) 95%, white)`,
+                          color: `color-mix(in oklch, var(--tint-${tint}) 35%, var(--foreground))`,
                         }}
                       >
                         {ev.title}

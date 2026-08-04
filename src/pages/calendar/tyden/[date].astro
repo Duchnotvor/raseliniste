@@ -33,6 +33,7 @@ if (mondayIso !== dateParam) {
 }
 
 // Načti eventy pro tento týden (s dedupem podle source/title/start/end ve view)
+// Bez select → jde ven i blocksBooking (přepínač blokování v detailu eventu)
 const rawEvents = await prisma.calendarEvent.findMany({
   where: {
     deletedRemotely: false,
@@ -140,6 +141,7 @@ const eventsForView = [
     prepNote: e.prepNote,
     itemsToBring: e.itemsToBring,
     allDay: e.allDay,
+    blocksBooking: e.blocksBooking,
   })),
   // Výročí jako virtual events s ANNIVERSARY source — WeekView je vykreslí
   // pink tintem jako allDay proužek nad osou

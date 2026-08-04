@@ -16,6 +16,7 @@ import { ChevronLeft, ChevronRight, Maximize2, MapPin, X, Sparkles, Printer } fr
 import { marked } from "marked";
 import { DEFAULT_RITUAL_TEMPLATES, type RitualType } from "@/lib/week-rituals";
 import WeekTasksList from "./WeekTasksList";
+import { BlocksToggle } from "./DayTimeline";
 
 interface WeekTask {
   id: string;
@@ -48,6 +49,7 @@ interface CalEvent {
   prepNote: string | null;
   itemsToBring: unknown;
   allDay: boolean;
+  blocksBooking?: boolean | null;
 }
 
 interface Props {
@@ -617,11 +619,14 @@ export default function WeekView({
                   </div>
                 </>
               ) : (
-                ev.description && (
-                  <p className="text-xs text-foreground/85 whitespace-pre-wrap mt-2 leading-relaxed">
-                    {ev.description}
-                  </p>
-                )
+                <>
+                  {ev.description && (
+                    <p className="text-xs text-foreground/85 whitespace-pre-wrap mt-2 leading-relaxed">
+                      {ev.description}
+                    </p>
+                  )}
+                  {ev.source !== "ANNIVERSARY" && <BlocksToggle key={ev.id} event={ev} />}
+                </>
               )}
             </div>
           </div>
