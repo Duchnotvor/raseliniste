@@ -65,6 +65,7 @@ interface CalendarEvent {
 export function BlocksToggle({ event }: { event: { id: string; blocksBooking?: boolean | null } }) {
   const [blocks, setBlocks] = useState<boolean | null | undefined>(event.blocksBooking);
   const [busy, setBusy] = useState(false);
+  const [seriesCount, setSeriesCount] = useState<number | null>(null);
   async function cycle() {
     const next = blocks === null || blocks === undefined ? false : blocks === false ? true : null;
     setBusy(true);
@@ -74,7 +75,11 @@ export function BlocksToggle({ event }: { event: { id: string; blocksBooking?: b
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ blocks: next }),
       });
-      if (res.ok) setBlocks(next);
+      if (res.ok) {
+        setBlocks(next);
+        const d = await res.json().catch(() => null);
+        setSeriesCount(d?.series && d.updatedCount > 1 ? d.updatedCount : null);
+      }
     } finally {
       setBusy(false);
     }
@@ -83,7 +88,12 @@ export function BlocksToggle({ event }: { event: { id: string; blocksBooking?: b
   const color = blocks === true ? "var(--c-signal)" : blocks === false ? "var(--tint-sage)" : "var(--muted-foreground)";
   return (
     <div className="flex items-center justify-between gap-2 pt-2 mt-2 border-t border-[var(--border)]">
-      <span className="text-xs text-muted-foreground">Blokuje nabídku schůzek (booking)</span>
+      <span className="text-xs text-muted-foreground">
+        Blokuje nabídku schůzek (booking)
+        {seriesCount !== null && (
+          <span className="block text-[10px] text-[var(--tint-sage)]">✓ nastaveno pro celou sérii ({seriesCount} opakování)</span>
+        )}
+      </span>
       <button
         type="button"
         onClick={cycle}

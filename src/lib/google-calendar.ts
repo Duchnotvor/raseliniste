@@ -196,7 +196,13 @@ async function upsertEvent(
   });
 
   if (!existing) {
-    const created = await prisma.calendarEvent.create({ data });
+    // Dědičnost blocksBooking pro nové výskyty opakované série (viz
+    // calendar-series.ts; Gideon 2026-08-04)
+    const { inheritSeriesBlocksBooking } = await import("./calendar-series");
+    const inherited = await inheritSeriesBlocksBooking("GOOGLE_PRIMARY", ev.id);
+    const created = await prisma.calendarEvent.create({
+      data: inherited === null ? data : { ...data, blocksBooking: inherited },
+    });
     void extractPrepInBackground(created.id, title, description);
     return "inserted";
   }

@@ -25,9 +25,25 @@ export const POST: APIRoute = async ({ request, params, cookies }) => {
   const event = await prisma.calendarEvent.findUnique({ where: { id: params.id } });
   if (!event) return Response.json({ error: "Událost nenalezena." }, { status: 404 });
 
-  await prisma.calendarEvent.update({
-    where: { id: event.id },
-    data: { blocksBooking: parsed.data.blocks },
-  });
-  return Response.json({ ok: true, blocksBooking: parsed.data.blocks });
+  // Gideon 2026-08-04: u opakované akce se override propíše na CELOU sérii
+  // (všechny výskyty v DB; budoucí výskyty dědí při syncu — calendar-series).
+  const { seriesUidOf } = await import("@/lib/calendar-series");
+  const seriesUid = seriesUidOf(event.externalId);
+  let updatedCount = 1;
+  if (seriesUid) {
+    const r = await prisma.calendarEvent.updateMany({
+      where: {
+        source: event.source,
+        OR: [{ externalId: seriesUid }, { externalId: { startsWith: `${seriesUid}_` } }],
+      },
+      data: { blocksBooking: parsed.data.blocks },
+    });
+    updatedCount = r.count;
+  } else {
+    await prisma.calendarEvent.update({
+      where: { id: event.id },
+      data: { blocksBooking: parsed.data.blocks },
+    });
+  }
+  return Response.json({ ok: true, blocksBooking: parsed.data.blocks, updatedCount, series: Boolean(seriesUid) });
 };

@@ -457,7 +457,14 @@ async function upsertOne(
   });
 
   if (!existing) {
-    const created = await prisma.calendarEvent.create({ data });
+    // Nový výskyt opakované akce dědí ruční blocksBooking override série —
+    // jinak by každý nově dosyncovaný týden spadl zpět na „auto"
+    // (Gideon 2026-08-04: „ať to nemusím dělat furt").
+    const { inheritSeriesBlocksBooking } = await import("./calendar-series");
+    const inherited = await inheritSeriesBlocksBooking(sourceTag, externalId);
+    const created = await prisma.calendarEvent.create({
+      data: inherited === null ? data : { ...data, blocksBooking: inherited },
+    });
     void extractPrepInBackground(created.id, title, description);
     return "inserted";
   }
