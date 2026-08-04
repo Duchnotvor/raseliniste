@@ -4,6 +4,49 @@
 > a ví kde se skončilo. Detail jednotlivých session bloků v
 > `INSTRUKCE/HANDOFF-*.md` a v memory souborech.
 
+## Session 2026-08-01 → 08-04 — Trencadís board, Meet přepisy, definitivní kontakty
+
+**Gidiho Týden (trencadís board)** — /planovani kompletně nahrazeno vizuálem
+DESIGN/board_work (Gaudí keramické střepy, deterministická geometrie FNV-1a,
+den jako mozaika písmen, week taby, tray Volné střepy). Data beze změny
+(Task.plannedFor, PlanningBlock, AI návrh, šablona, digest, WIP 3). Po–Pá,
+klouzavé týdny; víkendové plánování zmigrováno na pátek (DOW v Europe/Prague!).
+Doladění dle feedbacku: chip klienta „1 z 11 úkolů", sbalitelný tray
+(localStorage), rozbalení klienta do panelu POD chipy (neskáče), kontrast
+meta řádku ≥80 %, fullscreen přes SidebarToggle. Read-only sdílení pro
+kolegyni: /b/<token> (PlanningSettings.shareToken, tlačítka Sdílet /
+Zrušit sdílení, /b/ public v middleware, data v lib/planning-board-data.ts).
+Komponenta: TrencadisBoard.tsx (PlanningBoard.tsx smazán).
+
+**Kontakty — definitivní konec ztracených emailů** — root cause „kontakt
+nemá email" (Dlouhý 8×, Suková): tabulka držela změny jen v dirty mapě do
+kliknutí Uložit. FIX: AUTOSAVE každé buňky (server hned pushne do iCloudu),
+pozvánka nabídne pole pro email přímo (uloží ke kontaktu + iCloud, invite
+projde), picker ukazuje email/„bez emailu", input v tabulce min-w 14rem.
+
+**Kalendář** — detail události v denním/týdenním pohledu: theme-aware
+modal-panel (dřív hardcoded dark = nečitelné v light) + BlocksToggle
+(auto→neblokuje→blokuje) všude; blokování u opakované akce platí pro CELOU
+sérii včetně budoucích výskytů (lib/calendar-series.ts: seriesUidOf z
+externalId <uid>_<čas>, dědičnost při syncu iCloud i Google).
+
+**Meet přepisy → Studánka** — dle Gideonova návodu, adaptace: OAuth reauth
+(meetings.space.readonly+settings, drive.readonly) místo SA+DWD, Gemini API
+místo Vertexu. Cron meet-sync à 30 min: conferenceRecords → Drive mp4 →
+ffmpeg mono mp3 → transcribeAudioOnly (Files API >14 MB) → zápis
+(účastníci/shrnutí/rozhodnutí/úkoly). MeetNote inbox na /studna, přiřazení
+k projektu = ProjectRecording + analýza + RAG. MeetSpace = registrované
+místnosti s auto-recordingem (spaces.patch self-heal). DEPLOY: reauth +
+GCP enable Meet/Drive API.
+
+**Pošta** — fill-bodies 404 smyčka (maily smazané v Gmailu ucpaly frontu,
+93 chyb/tick, lastError „Requested entity was not found"): 404 → označit
+bodyDeletedAt, pending filtr ho přeskakuje, čistý tick uklidí lastError.
+
+Commity: 29e15e7 … 38e9115 (13). Vše ověřováno v dev (session JWT + seed
++ browser), regression testy kde šlo.
+
+
 ## Session 2026-07-15 → 07-31 — Maraton: ICS kalendáře, Todoist feed, krevní výsledky, ADHD plánování, kontakty fix, velký audit
 
 **~45 commitů (85de5ef … 82a0f1d). Nejdelší souvislá session projektu.**
