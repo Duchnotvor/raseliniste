@@ -1,6 +1,7 @@
 ---
 import Shell from "../../layouts/Shell.astro";
 import StudnaList from "../../components/StudnaList";
+import MeetInbox from "../../components/MeetInbox";
 import { prisma } from "../../lib/db";
 import { readSession } from "../../lib/session";
 
@@ -20,5 +21,8 @@ if (!user) return Astro.redirect("/login");
   heading="Studánka"
   breadcrumb={[{ label: "Studánka" }]}
 >
-  <StudnaList client:load mode="studanka" />
+  <div class="space-y-4">
+    <MeetInbox client:load />
+    <StudnaList client:load mode="studanka" />
+  </div>
 </Shell>

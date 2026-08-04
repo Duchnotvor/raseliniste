@@ -13,6 +13,7 @@ interface Initial {
   justConnected: boolean;
   oauthMisconfigured: boolean;
   hasGmailScope: boolean;
+  hasMeetScope: boolean;
 }
 
 export default function GoogleIntegration({ initial }: { initial: Initial }) {
@@ -200,6 +201,27 @@ export default function GoogleIntegration({ initial }: { initial: Initial }) {
           </div>
           <Button onClick={connect} disabled={Boolean(busy)}>
             {busy === "connect" ? <><Loader2 className="animate-spin" /> Spouštím…</> : <><Link2 /> Rozšířit oprávnění o Gmail</>}
+          </Button>
+        </div>
+      )}
+
+      {/* Banner pro chybejici Meet scope — prepisy schuzek do Studanky
+          (Gideon 2026-08-04). Reauth prida meetings.space.readonly + drive.readonly. */}
+      {connected && initial.hasGmailScope && !initial.hasMeetScope && (
+        <div className="glass-strong rounded-xl p-4 space-y-3 border-l-4 border-[var(--tint-sky)]">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="size-5 mt-0.5 text-[var(--tint-sky)]" />
+            <div className="flex-1">
+              <h4 className="font-medium">Meet přepisy zatím nejsou aktivní</h4>
+              <p className="text-sm text-muted-foreground mt-1">
+                Pro automatické přepisy nahraných Meet schůzek do Studánky je potřeba
+                povolit čtení Meet záznamů a Drive (nahrávky). Po reauthorizaci ještě
+                jednorázově zapni v GCP Console Google Meet API a Google Drive API.
+              </p>
+            </div>
+          </div>
+          <Button onClick={connect} disabled={Boolean(busy)}>
+            {busy === "connect" ? <><Loader2 className="animate-spin" /> Spouštím…</> : <><Link2 /> Rozšířit oprávnění o Meet</>}
           </Button>
         </div>
       )}

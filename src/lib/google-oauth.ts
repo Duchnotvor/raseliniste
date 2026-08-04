@@ -28,7 +28,16 @@ export const GOOGLE_SCOPES = [
   // ty starší scopy už nejsou potřeba samostatně.
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.send",
+  // Meet přepisy → Studánka (Gideon 2026-08-04): čtení conference records
+  // + nahrávek (mp4 leží na Drive). DEPLOY GOTCHA: v GCP Console musí být
+  // zapnuté Google Meet API + Google Drive API (scope ≠ enabled API,
+  // stejná past jako u Gmailu — feedback_gcp_gmail_api_enable.md).
+  "https://www.googleapis.com/auth/meetings.space.readonly",
+  "https://www.googleapis.com/auth/drive.readonly",
 ];
+
+/** Scope potřebný pro Meet přepisy (banner „rozšířit oprávnění") */
+export const MEET_REQUIRED_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly";
 
 /** Klíčový scope který signalizuje že Pošta může fungovat. Bez něj jen kalendář/kontakty. */
 export const POSTA_REQUIRED_SCOPE = "https://www.googleapis.com/auth/gmail.modify";

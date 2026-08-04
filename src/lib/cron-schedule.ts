@@ -61,6 +61,15 @@ export const CRON_JOBS: CronJobDef[] = [
     description: "Pull iCloud Contacts (CardDAV) + auto-merge duplicit",
   },
   {
+    name: "meet-sync",
+    endpoint: "/api/cron/meet-sync",
+    schedule: { type: "every", minutes: 30 },
+    // Zpracování (download + ffmpeg + Gemini) je fire-and-forget uvnitř,
+    // ale listing conference records může trvat — radši neblokovat dispatcher.
+    fireAndForget: true,
+    description: "Google Meet nahrávky → přepis + zápis do Studánka inboxu",
+  },
+  {
     name: "push-notifications",
     endpoint: "/api/cron/push-notifications",
     schedule: { type: "every", minutes: 5 },

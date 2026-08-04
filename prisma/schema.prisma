@@ -83,6 +83,7 @@ model User {
   emailDigests     EmailDigest[]
   postaEmbedFailures PostaEmbedFailure[]
   postaDeletionLogs  PostaDeletionLog[]
+  meetNotes        MeetNote[]
   // EncryptionKey nemá user FK — klíče jsou global (jeden klíč šifruje
   // všechny usery v single-user instance + key versioning pro rotace).
 
@@ -896,6 +897,8 @@ model ProjectBox {
   webhookSecret     String?
   externalClientRef String?
 
+  meetNotes         MeetNote[]
+
   // Prskavka modul = osobní projekty (knížky, nápady, soukromé tvoření).
   // false = klasická Studánka (sdílená s klienty), true = Prskavka (jen Petr).
   // Liší se jen filtrem a kde se zobrazí, jinak je chování identické.
@@ -968,6 +971,46 @@ model ProjectFile {
 
   @@index([projectId, uploadedAt])
   @@index([guestUserId])
+}
+
+// Google Meet přepisy (Gideon 2026-08-04, dle návodu meet-prepis z jiného
+// projektu, adaptováno: OAuth místo Service Account+DWD, Gemini API místo
+// Vertexu). Cron stáhne nahrávku z Drive → ffmpeg audio → Gemini přepis +
+// strukturovaný zápis. Nepřiřazené zápisy čekají v inboxu ve Studánce;
+// přiřazením k projektu vznikne ProjectRecording (analýza + RAG).
+model MeetNote {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // "conferenceRecords/xxx" — UNIQUE = idempotence (lekce z návodu)
+  conferenceRecord String   @unique
+  spaceName        String?  // "spaces/xxx"
+  startedAt        DateTime
+  endedAt          DateTime?
+  driveFileId      String?  // mp4 nahrávka na Drive
+
+  // pending = čeká na nahrávku (Google ji dogenerovává) | processing | done | error
+  status           String   @default("pending")
+  processingError  String?
+
+  transcript       String?  @db.Text
+  summaryMd        String?  @db.Text // strukturovaný zápis (markdown)
+
+  // Nápověda pro přiřazení: kalendářová událost překrývající schůzku
+  eventTitle       String?
+
+  projectId        String?
+  project          ProjectBox? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  recordingId      String?  @unique // ProjectRecording vzniklý přiřazením
+
+  // Tombstone — smazaný zápis se syncem nevrátí (lekce z návodu)
+  deleted          Boolean  @default(false)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId, status, startedAt])
 }
 
 model GuestUser {
