@@ -1067,7 +1067,7 @@ function EditableCell({
             if (e.key === "Enter") { e.preventDefault(); commit(); (e.currentTarget.closest("tr")?.nextElementSibling?.querySelector("td:nth-child(" + (Array.from(e.currentTarget.closest("tr")!.children).indexOf(e.currentTarget.closest("td")!) + 1) + ")") as HTMLElement | null)?.click(); }
             if (e.key === "Escape") cancel();
           }}
-          className="w-full px-1 py-0.5 rounded bg-black/40 border border-[var(--tint-sky)]/50 text-sm font-mono outline-none"
+          className="w-full min-w-[14rem] px-1 py-0.5 rounded bg-black/40 border border-[var(--tint-sky)]/50 text-sm font-mono outline-none"
         />
       </td>
     );
