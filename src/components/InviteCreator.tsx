@@ -10,6 +10,7 @@ interface Contact {
   displayName: string;
   isClient?: boolean;
   isFriend?: boolean;
+  emails?: { email: string }[];
 }
 
 interface InviteRow {
@@ -33,7 +34,12 @@ export default function InviteCreator() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactQuery, setContactQuery] = useState("");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  // Gideon 2026-08-04: kontakt bez emailu už neblokuje vytvoření — email se
+  // zadá rovnou tady a uloží se ke kontaktu (+ iCloud). Konec dohadování.
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [newEmail, setNewEmail] = useState("");
   const [universal, setUniversal] = useState(false);
+  const selectedNeedsEmail = !universal && !!selectedContact && !(selectedContact.emails?.length);
   const [mode, setMode] = useState<"CLIENT" | "FRIEND">("CLIENT");
   const [meetingType, setMeetingType] = useState<"CHOICE_PRAGUE" | "CHOICE_ONLINE" | "CHOICE_HOME" | "CHOICE_ANY" | "CHOICE_LUNCH_PRAGUE">("CHOICE_ANY");
   const [duration, setDuration] = useState("60");
@@ -110,6 +116,7 @@ export default function InviteCreator() {
           internalNote: internalNote.trim() || undefined,
           availableFrom: availableFrom.trim() || undefined,
           publicNote: publicNote.trim() || undefined,
+          contactEmail: !universal && selectedNeedsEmail && newEmail.trim() ? newEmail.trim() : undefined,
         }),
       });
       const text = await res.text();
@@ -264,16 +271,33 @@ export default function InviteCreator() {
               {filteredContacts.slice(0, 10).map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => { setSelectedContactId(c.id); setContactQuery(c.displayName); }}
+                  onClick={() => { setSelectedContactId(c.id); setSelectedContact(c); setNewEmail(""); setContactQuery(c.displayName); }}
                   className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 last:border-0 hover:bg-white/5 ${selectedContactId === c.id ? "bg-[var(--tint-sky)]/10" : ""}`}
                 >
                   {c.displayName}
+                  {c.emails?.length
+                    ? <span className="ml-2 text-[10px] font-mono text-muted-foreground">{c.emails[0].email}</span>
+                    : <span className="ml-2 text-[10px] font-mono text-[color:var(--c-signal)]">bez emailu</span>}
                 </button>
               ))}
               {filteredContacts.length === 0 && (
                 <div className="px-3 py-3 text-xs text-muted-foreground italic">Žádné kontakty.</div>
               )}
             </div>
+            {selectedNeedsEmail && (
+              <div className="mt-2 rounded-md border border-[color:var(--c-signal)]/40 bg-[color:var(--c-signal)]/5 p-3">
+                <div className="text-xs font-medium mb-1.5">
+                  <Mail className="inline size-3.5 mr-1 -mt-0.5" />
+                  {selectedContact?.displayName} nemá email — zapiš ho sem. Uloží se ke kontaktu (i na iCloud) a pozvánka se normálně vytvoří.
+                </div>
+                <Input
+                  type="email"
+                  placeholder="email@..."
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -376,7 +400,7 @@ export default function InviteCreator() {
           <Input value={internalNote} onChange={(e) => setInternalNote(e.target.value)} placeholder="O čem to bude…" />
         </div>
 
-        <Button onClick={create} disabled={busy || (!universal && !selectedContactId)}>
+        <Button onClick={create} disabled={busy || (!universal && !selectedContactId) || (selectedNeedsEmail && !/^\S+@\S+\.\S+$/.test(newEmail.trim()))}>
           {busy ? <><Loader2 className="animate-spin" /> Vytvářím…</> : <><Send /> Vygenerovat link</>}
         </Button>
 

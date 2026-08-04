@@ -194,10 +194,41 @@ export default function ContactsTable({ initialTotal, icloudStatus, googleStatus
     }
   }
 
-  // Cell edit handler — uloží do dirty mapy + local edit
+  // FIX 2026-08-04 (Gideon: „chci aby to kurva fungovalo" — 2× ztracený
+  // email, protože změna žila jen v dirty mapě, dokud se nekliklo Uložit):
+  // AUTOSAVE — každá potvrzená buňka se uloží OKAMŽITĚ (server rovnou
+  // pushne do iCloudu). Dirty mapa zůstává jen jako fallback pro selhání.
+  async function saveChange(change: { id: string; field: string; value: string | number | boolean | null | string[] }) {
+    const key = `${change.id}-${change.field}`;
+    try {
+      const res = await fetch("/api/contacts/tabulka", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ changes: [change] }),
+      });
+      const data = await res.json().catch(() => null);
+      const r = data?.results?.[0] as { ok: boolean; error?: string } | undefined;
+      if (!res.ok || !r?.ok) {
+        setError(`Uložení se nepovedlo (${r?.error ?? data?.error ?? "chyba serveru"}) — změna je neuložená, zkus tlačítko Uložit do iCloudu.`);
+        return;
+      }
+      setDirty((m) => { const n = new Map(m); n.delete(key); return n; });
+      if (r.error) {
+        setError(`Uloženo v Rašeliništi, ale iCloud push selhal (${r.error}) — zkus Uložit do iCloudu, jinak to sync přepíše.`);
+      } else {
+        setMessage("✓ Uloženo");
+        setTimeout(() => setMessage(null), 2000);
+      }
+    } catch {
+      setError("Síťová chyba při ukládání — změna je neuložená, zkus tlačítko Uložit do iCloudu.");
+    }
+  }
+
+  // Cell edit handler — local edit + OKAMŽITÉ uložení (autosave)
   function editCell(contactId: string, field: string, value: string | number | boolean | null | string[]) {
     const key = `${contactId}-${field}`;
     setDirty((m) => new Map(m).set(key, { id: contactId, field, value }));
+    void saveChange({ id: contactId, field, value });
 
     // Apply lokálně pro instant feedback
     setLocalEdits((m) => {

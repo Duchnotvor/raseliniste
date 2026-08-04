@@ -17,6 +17,10 @@ const schema = z.object({
   // Petr 2026-05-25: per-invite earliest slot. Akceptujeme ISO date (YYYY-MM-DD)
   // nebo plný ISO datetime. Prázdný string nebo null = žádné omezení.
   availableFrom: z.string().min(1).optional().nullable(),
+  // Gideon 2026-08-04 („chci aby to fungovalo"): kontakt bez emailu už
+  // neblokuje — email se zadá rovnou v pozvánce a uloží se KE KONTAKTU
+  // (+ push do iCloudu), pak se pozvánka normálně vytvoří.
+  contactEmail: z.string().email().optional(),
 });
 
 /**
@@ -44,6 +48,29 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   );
 
   try {
+    // Doplnění emailu ke kontaktu přímo z pozvánky (jen když žádný nemá —
+    // existující email má přednost). Push do iCloudu nesmí shodit vytvoření
+    // pozvánky: selhání jen zalogujeme, DB email už drží.
+    if (parsed.data.contactId && parsed.data.contactEmail) {
+      const c = await prisma.contact.findFirst({
+        where: { id: parsed.data.contactId, userId: session.uid },
+        select: { id: true, icloudUid: true, emails: { select: { id: true }, take: 1 } },
+      });
+      if (c && c.emails.length === 0) {
+        await prisma.contactEmail.create({
+          data: { contactId: c.id, email: parsed.data.contactEmail.toLowerCase(), label: "work" },
+        });
+        console.log(`[booking.invite] email doplněn ke kontaktu ${c.id} z pozvánky`);
+        if (c.icloudUid) {
+          const { pushContactToIcloud } = await import("@/lib/icloud-contacts");
+          const push = await pushContactToIcloud(session.uid, c.id).catch((e) => ({
+            ok: false as const, error: e instanceof Error ? e.message : String(e),
+          }));
+          if (!push.ok) console.warn(`[booking.invite] iCloud push emailu selhal (${c.id}):`, push.error);
+        }
+      }
+    }
+
     // availableFrom: YYYY-MM-DD nebo plný ISO. Parse → Date, nebo null pokud
     // prázdné/v minulosti. Pokud Petr pošle jen datum, bere se 00:00 Europe/Prague.
     let availableFrom: Date | null = null;
