@@ -70,6 +70,10 @@ export async function syncMeetNotes(userId: string): Promise<MeetSyncStats> {
     data: { status: "pending" },
   });
 
+  // Self-heal auto-recordingu registrovaných místností (recept z návodu:
+  // spaces.patch → autoRecordingGeneration=ON; krok 1 každého běhu)
+  await healMeetSpaces(userId, token);
+
   const since = new Date(Date.now() - SYNC_WINDOW_DAYS * 86400000).toISOString();
   let pageToken: string | undefined;
   interface ConfRecord { name: string; space?: string; startTime?: string; endTime?: string }
@@ -151,6 +155,42 @@ export async function syncMeetNotes(userId: string): Promise<MeetSyncStats> {
   }
 
   return stats;
+}
+
+/**
+ * Zapne auto-recording všem registrovaným místnostem (MeetSpace).
+ * Vyžaduje scope meetings.space.settings; PATCH smí jen host místnosti.
+ * Selhání jedné místnosti neshodí sync — zapíše se do MeetSpace.lastError.
+ */
+export async function healMeetSpaces(userId: string, token: string): Promise<void> {
+  const spaces = await prisma.meetSpace.findMany({ where: { userId } });
+  for (const s of spaces) {
+    try {
+      const url = `${MEET_API}/spaces/${encodeURIComponent(s.meetingCode)}?updateMask=config.artifactConfig.recordingConfig.autoRecordingGeneration`;
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          config: { artifactConfig: { recordingConfig: { autoRecordingGeneration: "ON" } } },
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`spaces.patch ${res.status}: ${body.slice(0, 250)}`);
+      }
+      await prisma.meetSpace.update({
+        where: { id: s.id },
+        data: { autoRecordOk: true, lastHealAt: new Date(), lastError: null },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[meet-sync] auto-record heal ${s.meetingCode}:`, msg);
+      await prisma.meetSpace.update({
+        where: { id: s.id },
+        data: { autoRecordOk: false, lastHealAt: new Date(), lastError: msg.slice(0, 400) },
+      }).catch(() => null);
+    }
+  }
 }
 
 /** Stáhne mp4 z Drive, vytáhne audio, přepíše a udělá strukturovaný zápis. */

@@ -23,6 +23,14 @@ interface MeetNoteRow {
 
 interface ProjectOpt { id: string; name: string }
 
+interface SpaceRow {
+  id: string;
+  meetingCode: string;
+  label: string | null;
+  autoRecordOk: boolean;
+  lastError: string | null;
+}
+
 export default function MeetInbox() {
   const [notes, setNotes] = useState<MeetNoteRow[] | null>(null);
   const [hasScope, setHasScope] = useState(true);
@@ -31,12 +39,23 @@ export default function MeetInbox() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Registrované místnosti s auto-nahráváním (spaces.patch self-heal v cronu)
+  const [spaces, setSpaces] = useState<SpaceRow[]>([]);
+  const [spacesOpen, setSpacesOpen] = useState(false);
+  const [newSpace, setNewSpace] = useState("");
+  const [newSpaceLabel, setNewSpaceLabel] = useState("");
+  const [addingSpace, setAddingSpace] = useState(false);
 
   async function load() {
-    const [meetRes, projRes] = await Promise.all([
+    const [meetRes, projRes, spacesRes] = await Promise.all([
       fetch("/api/studna/meet"),
       fetch("/api/studna"),
+      fetch("/api/studna/meet/spaces"),
     ]);
+    if (spacesRes.ok) {
+      const d = await spacesRes.json();
+      setSpaces(d.spaces ?? []);
+    }
     if (meetRes.ok) {
       const d = await meetRes.json();
       setNotes(d.notes ?? []);
@@ -76,6 +95,32 @@ export default function MeetInbox() {
     await load();
   }
 
+  async function addSpace() {
+    if (!newSpace.trim()) return;
+    setAddingSpace(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/studna/meet/spaces", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: newSpace, label: newSpaceLabel.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) { setError(d.error ?? "Přidání selhalo."); return; }
+      setNewSpace("");
+      setNewSpaceLabel("");
+      setSpaces((s) => {
+        const next = s.filter((x) => x.id !== d.space.id);
+        return [...next, d.space];
+      });
+    } finally { setAddingSpace(false); }
+  }
+
+  async function removeSpace(id: string) {
+    const res = await fetch(`/api/studna/meet/spaces?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
+    if (res?.ok) setSpaces((s) => s.filter((x) => x.id !== id));
+  }
+
   async function remove(noteId: string) {
     if (!confirm("Zahodit tento zápis? Sync ho už nevrátí.")) return;
     const res = await fetch(`/api/studna/meet/${noteId}`, { method: "DELETE" }).catch(() => null);
@@ -111,6 +156,60 @@ export default function MeetInbox() {
 
       {error && <div className="text-sm text-[var(--destructive,#e5484d)]">{error}</div>}
       {message && <div className="text-sm text-muted-foreground">{message}</div>}
+
+      {/* Registrované místnosti — auto-recording self-heal (recept z návodu) */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setSpacesOpen((v) => !v)}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {spacesOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          Místnosti s automatickým nahráváním ({spaces.length})
+        </button>
+        {spacesOpen && (
+          <div className="mt-2 space-y-2">
+            <div className="text-xs text-muted-foreground">
+              Trvalé Meet linky (např. místnost pro klienta). Systém jim každých 30 minut
+              zapíná automatické nahrávání — schůzka se pak nahraje i bez kliknutí na Record.
+            </div>
+            {spaces.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 text-sm rounded-md border border-border px-3 py-1.5">
+                <span className="font-mono text-xs">{s.meetingCode}</span>
+                {s.label && <span className="text-muted-foreground text-xs truncate">{s.label}</span>}
+                {s.autoRecordOk ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-mono text-[var(--tint-sage)] ml-auto"><Check className="size-3" /> nahrávání zapnuto</span>
+                ) : s.lastError ? (
+                  <span className="text-[11px] font-mono text-[color:var(--c-signal)] ml-auto truncate max-w-[16rem]" title={s.lastError}>selhalo: {s.lastError.slice(0, 60)}…</span>
+                ) : (
+                  <span className="text-[11px] font-mono text-muted-foreground ml-auto">čeká na první heal…</span>
+                )}
+                <button type="button" onClick={() => void removeSpace(s.id)} title="Odebrat místnost" className="p-1 rounded text-muted-foreground hover:text-foreground">
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                value={newSpace}
+                onChange={(e) => setNewSpace(e.target.value)}
+                placeholder="meet.google.com/xxx-xxxx-xxx"
+                className="rounded-md border border-border bg-card px-2 py-1.5 text-sm font-mono w-64"
+              />
+              <input
+                value={newSpaceLabel}
+                onChange={(e) => setNewSpaceLabel(e.target.value)}
+                placeholder="popisek (volitelný)"
+                className="rounded-md border border-border bg-card px-2 py-1.5 text-sm w-44"
+              />
+              <Button onClick={() => void addSpace()} disabled={addingSpace || !newSpace.trim()} size="sm" variant="outline">
+                {addingSpace ? <Loader2 className="size-4 animate-spin" /> : null}
+                Přidat místnost
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {notes.length === 0 ? (
         <div className="text-sm text-muted-foreground italic">Žádné zápisy — až proběhne nahraná Meet schůzka, objeví se tady.</div>

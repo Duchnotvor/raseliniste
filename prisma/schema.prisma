@@ -84,6 +84,7 @@ model User {
   postaEmbedFailures PostaEmbedFailure[]
   postaDeletionLogs  PostaDeletionLog[]
   meetNotes        MeetNote[]
+  meetSpaces       MeetSpace[]
   // EncryptionKey nemá user FK — klíče jsou global (jeden klíč šifruje
   // všechny usery v single-user instance + key versioning pro rotace).
 
@@ -1011,6 +1012,22 @@ model MeetNote {
   updatedAt        DateTime @updatedAt
 
   @@index([userId, status, startedAt])
+}
+
+// Registrovaná Meet místnost (trvalý link) — cron jí self-healem zapíná
+// auto-recording (spaces.patch, dle receptu z meet-prepis návodu).
+model MeetSpace {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetingCode   String   // "abc-defg-hij" (z meet.google.com/abc-defg-hij)
+  label         String?  // volitelný popisek ("Avecomp porady")
+  autoRecordOk  Boolean  @default(false) // poslední self-heal prošel
+  lastHealAt    DateTime?
+  lastError     String?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, meetingCode])
 }
 
 model GuestUser {

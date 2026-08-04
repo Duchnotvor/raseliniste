@@ -34,10 +34,15 @@ export const GOOGLE_SCOPES = [
   // stejná past jako u Gmailu — feedback_gcp_gmail_api_enable.md).
   "https://www.googleapis.com/auth/meetings.space.readonly",
   "https://www.googleapis.com/auth/drive.readonly",
+  // Auto-zapínání nahrávání registrovaných místností (spaces.patch —
+  // autoRecordingGeneration=ON; Gideon 2026-08-04 „tohle chci hned")
+  "https://www.googleapis.com/auth/meetings.space.settings",
 ];
 
 /** Scope potřebný pro Meet přepisy (banner „rozšířit oprávnění") */
 export const MEET_REQUIRED_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly";
+/** Scope pro auto-recording místností (spaces.patch) */
+export const MEET_SETTINGS_SCOPE = "https://www.googleapis.com/auth/meetings.space.settings";
 
 /** Klíčový scope který signalizuje že Pošta může fungovat. Bez něj jen kalendář/kontakty. */
 export const POSTA_REQUIRED_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
