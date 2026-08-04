@@ -436,15 +436,21 @@ export async function fillBodiesTick(userId: string): Promise<FillBodiesStats> {
     durationMs: 0,
   };
 
-  // Najdi metadata-only maily (bez body) seřazené od nejnovějších
+  // Najdi metadata-only maily (bez body) seřazené od nejnovějších.
+  // FIX 2026-08-04 (Gideon: „Requested entity was not found" v Google
+  // integraci): bodyDeletedAt NOT NULL se přeskakuje — jednak retention
+  // vyčištěné maily, jednak maily SMAZANÉ v Gmailu (404), které dřív
+  // ucpaly frontu a každý 10min tick sypal ~93 chyb do lastError.
+  const pendingWhere = {
+    userId,
+    bodyText: null,
+    bodyTextCiphertext: null,
+    bodyHtml: null,
+    bodyHtmlCiphertext: null,
+    bodyDeletedAt: null,
+  };
   const pending = await prisma.emailMessage.findMany({
-    where: {
-      userId,
-      bodyText: null,
-      bodyTextCiphertext: null,
-      bodyHtml: null,
-      bodyHtmlCiphertext: null,
-    },
+    where: pendingWhere,
     orderBy: { receivedAt: "desc" },
     take: FILL_BODIES_PER_TICK,
     select: { id: true, gmailMessageId: true },
@@ -481,20 +487,32 @@ export async function fillBodiesTick(userId: string): Promise<FillBodiesStats> {
       stats.filled++;
       await sleep(50);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Mail smazaný v Gmailu → tělo už nikdy nedostaneme. Označit
+      // bodyDeletedAt, ať ho příští tick nezkouší znovu (metadata zůstávají).
+      if (/not found/i.test(msg) || (err as { code?: number })?.code === 404) {
+        await prisma.emailMessage.update({
+          where: { id: m.id },
+          data: { bodyDeletedAt: new Date() },
+        }).catch(() => null);
+        console.log(`[posta-fill-bodies] msg=${m.gmailMessageId} smazán v Gmailu — označen, už se nezkouší`);
+        continue;
+      }
       stats.errors++;
-      console.warn(`[posta-fill-bodies] msg=${m.gmailMessageId} err=${err instanceof Error ? err.message : err}`);
+      console.warn(`[posta-fill-bodies] msg=${m.gmailMessageId} err=${msg}`);
     }
   }
 
-  const remainingCount = await prisma.emailMessage.count({
-    where: {
-      userId,
-      bodyText: null,
-      bodyTextCiphertext: null,
-      bodyHtml: null,
-      bodyHtmlCiphertext: null,
-    },
-  });
+  // 404 z getMessage zapsaly lastError do integrace — když tick doběhl bez
+  // skutečných chyb, uklidit, ať v /settings/integrations/google nestraší.
+  if (stats.errors === 0) {
+    await prisma.userIntegration.updateMany({
+      where: { userId, provider: "google" },
+      data: { lastError: null },
+    }).catch(() => null);
+  }
+
+  const remainingCount = await prisma.emailMessage.count({ where: pendingWhere });
   stats.remaining = remainingCount;
   stats.ok = true;
   stats.durationMs = Date.now() - start;
