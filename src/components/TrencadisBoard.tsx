@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /**
  * Nástěnka mozaiky — trencadís kanban (DESIGN/board_work, replikace 1:1).
@@ -172,9 +172,23 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
   const [dragGroup, setDragGroup] = useState<string | null>(null);
   const [dragBlockId, setDragBlockId] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null); // date | "pool" | null
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Gideon 2026-08-04: rozbalení klienta NEsmí rozhazovat řádek chipů —
+  // úkoly se ukazují v samostatném pruhu POD chipy; otevřený max 1 klient.
+  const [expandedClient, setExpandedClient] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Gideon 2026-08-04: „moznost srolovani at me to nerusi" — tray se dá
+  // sbalit klikem na nadpis; stav persistuje. Hydratace v useEffect (SSR).
+  const [trayOpen, setTrayOpen] = useState(true);
+  useEffect(() => {
+    try { if (localStorage.getItem("trc-tray-open") === "false") setTrayOpen(false); } catch { /* private mode */ }
+  }, []);
+  function toggleTray() {
+    setTrayOpen((v) => {
+      try { localStorage.setItem("trc-tray-open", String(!v)); } catch { /* private mode */ }
+      return !v;
+    });
+  }
 
   // ---- AI návrh týdne (beze změny logiky) ----
   interface Proposal { taskId: string; title: string; date: string; reason: string | null }
@@ -371,14 +385,14 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
   function ClientChip({ name, count }: { name: string; count: number }) {
     const s = shard("grp|" + name);
     const hex = colorFor(name);
-    const openNow = expanded.has(name) || filter.length > 0;
+    const openNow = expandedClient === name;
     return (
       <button
         type="button"
         draggable={!readOnly}
         onDragStart={(e) => { if (readOnly) return; setDragGroup(name); e.dataTransfer.effectAllowed = "copy"; }}
         onDragEnd={onDragEnd}
-        onClick={() => setExpanded((s2) => { const n = new Set(s2); if (n.has(name)) n.delete(name); else n.add(name); return n; })}
+        onClick={() => setExpandedClient((cur) => (cur === name ? null : name))}
         title="Klik = rozbalit úkoly · přetáhni na den = blok pro celého klienta"
         style={{
           display: "flex", alignItems: "center", gap: 9, background: openNow ? "#FFFCF4" : "rgba(255,252,244,0.72)",
@@ -630,37 +644,86 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
           display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
         }}
       >
-        <div style={{ flex: "0 0 auto", maxWidth: 200 }}>
-          <div style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.16em", fontSize: 12, fontWeight: 600, color: "#17403f" }}>Volné střepy</div>
-          <div style={{ fontFamily: F_BARLOW, fontSize: 12, color: "#6b6153", marginTop: 3 }}>{readOnly ? "Čeká na naplánování" : "Přetáhni je do dne v týdnu"}</div>
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Hledat…"
-            style={{ marginTop: 7, width: "100%", fontFamily: F_BARLOW, fontSize: 12.5, background: "rgba(255,252,244,0.72)", border: "1px solid rgba(74,58,36,0.2)", borderRadius: "6px 4px 7px 4px", padding: "5px 8px", color: "#2A241C" }}
-          />
-          {!readOnly && <button
-            type="button" onClick={askAi} disabled={aiBusy}
-            style={{ marginTop: 7, fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 11, fontWeight: 600, color: "#C1553A", background: "rgba(255,252,244,0.72)", border: "1px solid rgba(193,85,58,0.4)", borderRadius: "7px 5px 8px 5px", padding: "6px 10px", cursor: "pointer", opacity: aiBusy ? 0.6 : 1 }}
-          >{aiBusy ? "Skládám návrh…" : "✦ Navrhnout týden (AI)"}</button>}
-        </div>
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          {backlogGroups.overdue.map((c) => <Chip key={c.id} c={c} />)}
-          {backlogGroups.groups.map(([name, groupCards]) => {
-            const openNow = expanded.has(name) || filter.length > 0;
-            return (
-              <span key={name} style={{ display: "contents" }}>
-                <ClientChip name={name} count={groupCards.length} />
-                {openNow && groupCards.map((c) => <Chip key={c.id} c={c} />)}
+        <div style={{ flex: trayOpen ? "0 0 auto" : 1, maxWidth: trayOpen ? 200 : undefined, minWidth: 0 }}>
+          <button
+            type="button"
+            onClick={toggleTray}
+            title={trayOpen ? "Sbalit — ať neruší" : "Rozbalit volné střepy"}
+            style={{ display: "flex", alignItems: "baseline", gap: 8, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.16em", fontSize: 12, fontWeight: 600, color: "#17403f" }}
+          >
+            <span style={{ fontSize: 10 }}>{trayOpen ? "▾" : "▸"}</span>
+            Volné střepy
+            {!trayOpen && (
+              <span style={{ fontFamily: F_BARLOW, textTransform: "none", letterSpacing: 0, fontWeight: 600, fontSize: 12, color: "#6b6153" }}>
+                — {backlogTotal} {plural(backlogTotal, "úkol", "úkoly", "úkolů")} čeká
               </span>
-            );
-          })}
-          {backlogCards.length === 0 && (
-            <div style={{ fontFamily: F_BARLOW, fontSize: 13, color: "rgba(74,58,36,0.55)", padding: "8px 2px" }}>
-              {filter ? "Nic nenalezeno." : "Všechny střepy jsou rozdělené — sem můžeš vrátit úkol zpátky."}
-            </div>
+            )}
+          </button>
+          {trayOpen && (
+            <>
+              <div style={{ fontFamily: F_BARLOW, fontSize: 12, color: "#6b6153", marginTop: 3 }}>{readOnly ? "Čeká na naplánování" : "Přetáhni je do dne v týdnu"}</div>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Hledat…"
+                style={{ marginTop: 7, width: "100%", fontFamily: F_BARLOW, fontSize: 12.5, background: "rgba(255,252,244,0.72)", border: "1px solid rgba(74,58,36,0.2)", borderRadius: "6px 4px 7px 4px", padding: "5px 8px", color: "#2A241C" }}
+              />
+              {!readOnly && <button
+                type="button" onClick={askAi} disabled={aiBusy}
+                style={{ marginTop: 7, fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 11, fontWeight: 600, color: "#C1553A", background: "rgba(255,252,244,0.72)", border: "1px solid rgba(193,85,58,0.4)", borderRadius: "7px 5px 8px 5px", padding: "6px 10px", cursor: "pointer", opacity: aiBusy ? 0.6 : 1 }}
+              >{aiBusy ? "Skládám návrh…" : "✦ Navrhnout týden (AI)"}</button>}
+            </>
           )}
         </div>
+        {trayOpen && (
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* Řádek chipů — stabilní, rozbalení s ním nehýbe */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              {backlogGroups.overdue.map((c) => <Chip key={c.id} c={c} />)}
+              {backlogGroups.groups.map(([name, groupCards]) => (
+                <ClientChip key={name} name={name} count={groupCards.length} />
+              ))}
+              {backlogCards.length === 0 && (
+                <div style={{ fontFamily: F_BARLOW, fontSize: 13, color: "rgba(74,58,36,0.55)", padding: "8px 2px" }}>
+                  {filter ? "Nic nenalezeno." : "Všechny střepy jsou rozdělené — sem můžeš vrátit úkol zpátky."}
+                </div>
+              )}
+            </div>
+            {/* Úkoly rozbaleného klienta (nebo výsledky hledání) — vlastní pruh */}
+            {(() => {
+              const showFilter = filter.length > 0;
+              const activeName = showFilter ? null : expandedClient;
+              const panelCards = showFilter
+                ? backlogCards.filter((c) => !c.overdue)
+                : activeName
+                  ? (backlogGroups.groups.find(([n]) => n === activeName)?.[1] ?? [])
+                  : [];
+              if (panelCards.length === 0 && !activeName) return null;
+              return (
+                <div style={{ background: "rgba(255,252,244,0.5)", border: "1px solid rgba(74,58,36,0.15)", borderRadius: "10px 7px 11px 8px", padding: "10px 12px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.14em", fontSize: 11, fontWeight: 600, color: "#17403f" }}>
+                      {showFilter ? `Hledání „${filter}"` : activeName}
+                    </span>
+                    {!showFilter && activeName && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedClient(null)}
+                        style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 10.5, fontWeight: 600, color: "#948a79" }}
+                      >zavřít ×</button>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                    {panelCards.map((c) => <Chip key={c.id} c={c} />)}
+                    {panelCards.length === 0 && (
+                      <span style={{ fontFamily: F_BARLOW, fontSize: 12.5, color: "rgba(74,58,36,0.55)" }}>Nic k zobrazení.</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* ---- Board: 5 denních sloupců ---- */}
@@ -700,23 +763,25 @@ export default function TrencadisBoard({ weekStart, days, initialCards, initialB
                     >{l.ch}</span>
                   ))}
                 </span>
-                <span style={{ flex: "0 0 auto", fontFamily: F_BARLOW, fontSize: 11.5, fontWeight: 600, color: wipOver ? "#A8412C" : "rgba(58,50,38,0.62)" }}>
+                <span style={{ flex: "0 0 auto", fontFamily: F_BARLOW, fontSize: 11.5, fontWeight: 600, color: wipOver ? "#A8412C" : "rgba(42,36,28,0.8)" }}>
                   {wipOver ? `${count}!` : count}
                 </span>
               </div>
               {/* Meta: datum · dnes · režim dne · schůzky */}
               <div style={{ padding: "0 11px 2px", display: "flex", flexDirection: "column", gap: 2 }}>
-                <div style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 10.5, fontWeight: 600, color: d.isToday ? "#C1553A" : "rgba(58,50,38,0.55)" }}>
+                {/* Gideon 2026-08-04: „nečitelné vůči pozadí" — inkoust ≥80 %
+                    (kontrast je must-have, viz CLAUDE.md design pravidla) */}
+                <div style={{ fontFamily: F_COND, textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 10.5, fontWeight: 600, color: d.isToday ? "#C1553A" : "rgba(42,36,28,0.82)" }}>
                   {d.dateLabel}{d.isToday ? " · dnes" : ""}{d.modeName ? ` · ${d.modeName}${d.modeLabel ? ` (${d.modeLabel})` : ""}` : ""}
                 </div>
                 {d.meetings.length > 0 && (
-                  <div style={{ fontFamily: F_BARLOW, fontSize: 11, lineHeight: 1.4, color: "rgba(58,50,38,0.62)" }}>
+                  <div style={{ fontFamily: F_BARLOW, fontSize: 11.5, fontWeight: 500, lineHeight: 1.45, color: "rgba(42,36,28,0.88)" }}>
                     {d.meetings.map((m, i) => (
                       <span key={i} style={{ whiteSpace: "nowrap" }}>
                         {m.time} {m.title.length > 22 ? `${m.title.slice(0, 21)}…` : m.title}{i < d.meetings.length - 1 ? " · " : ""}
                       </span>
                     ))}
-                    {d.busyHours > 0 && <span style={{ opacity: 0.7 }}> ({d.busyHours.toFixed(1)} h)</span>}
+                    {d.busyHours > 0 && <span style={{ opacity: 0.85 }}> ({d.busyHours.toFixed(1)} h)</span>}
                   </div>
                 )}
               </div>
