@@ -47,23 +47,35 @@ export default function MeetInbox() {
   const [addingSpace, setAddingSpace] = useState(false);
 
   async function load() {
-    const [meetRes, projRes, spacesRes] = await Promise.all([
-      fetch("/api/studna/meet"),
-      fetch("/api/studna"),
-      fetch("/api/studna/meet/spaces"),
-    ]);
-    if (spacesRes.ok) {
-      const d = await spacesRes.json();
-      setSpaces(d.spaces ?? []);
-    }
-    if (meetRes.ok) {
-      const d = await meetRes.json();
-      setNotes(d.notes ?? []);
-      setHasScope(d.hasMeetScope ?? false);
-    }
-    if (projRes.ok) {
-      const d = await projRes.json();
-      setProjects((d.projects ?? []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
+    // FIX 2026-08-04 (Gideon: „proste to nevidim"): když load selže, sekce
+    // se dřív VŮBEC nevykreslila (notes zůstalo null → return null).
+    // Teď se vždy ukáže — i s chybou, ať je co poslat.
+    try {
+      const [meetRes, projRes, spacesRes] = await Promise.all([
+        fetch("/api/studna/meet"),
+        fetch("/api/studna"),
+        fetch("/api/studna/meet/spaces"),
+      ]);
+      if (spacesRes.ok) {
+        const d = await spacesRes.json();
+        setSpaces(d.spaces ?? []);
+      }
+      if (meetRes.ok) {
+        const d = await meetRes.json();
+        setNotes(d.notes ?? []);
+        setHasScope(d.hasMeetScope ?? false);
+      } else {
+        const d = await meetRes.json().catch(() => null);
+        setNotes([]);
+        setError(`Načtení Meet sekce selhalo (HTTP ${meetRes.status}${d?.error ? `: ${d.error}` : ""}) — pošli tohle Claudovi.`);
+      }
+      if (projRes.ok) {
+        const d = await projRes.json();
+        setProjects((d.projects ?? []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
+      }
+    } catch (e) {
+      setNotes([]);
+      setError(`Načtení Meet sekce selhalo (${e instanceof Error ? e.message : "síťová chyba"}).`);
     }
   }
   useEffect(() => { void load(); }, []);
@@ -133,7 +145,15 @@ export default function MeetInbox() {
     return `${s.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" })} ${s.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}${dur ? ` · ${dur} min` : ""}`;
   };
 
-  if (notes === null) return null;
+  if (notes === null) {
+    return (
+      <div className="glass-subtle rounded-xl p-4 flex items-center gap-2 text-sm text-muted-foreground">
+        <Video className="size-4" />
+        <span className="font-medium text-foreground">Zápisy ze schůzek (Meet)</span>
+        <Loader2 className="size-4 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="glass-subtle rounded-xl p-4 space-y-3">
