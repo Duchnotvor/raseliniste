@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, Loader2, AlertTriangle, Upload, CheckSquare, BookOpen, Lock, Eye, EyeOff, Paperclip } from "lucide-react";
+import { Mic, Square, Loader2, AlertTriangle, Upload, Check, CheckSquare, BookOpen, Lock, Eye, EyeOff, Paperclip } from "lucide-react";
 import { useRecordingProtection, recordingProtectionTip } from "./useRecordingProtection";
 
 const TICK_MS = 250;
@@ -32,7 +32,7 @@ const MODES = {
 } as const;
 
 type Mode = "task" | "journal";
-type Phase = "idle" | "recording" | "uploading" | "redirecting" | "error";
+type Phase = "idle" | "recording" | "uploading" | "redirecting" | "done" | "error";
 
 function loadMode(): Mode {
   if (typeof window === "undefined") return "task";
@@ -183,8 +183,35 @@ export default function DiktatRecorder() {
     })();
   }
 
-  async function uploadFile(file: File) {
-    await upload(file, 0);
+  // FIX 2026-08-04 (Gideon: „absolutne nevidim jestli se soubor nahral"):
+  // upload SOUBORU má viditelný průběh (%) + Hotovo ✓ + chybu. Tiché
+  // fire-and-forget zůstává jen pro diktování mikrofonem (2026-05-19).
+  const [uploadPct, setUploadPct] = useState(0);
+  function uploadFile(file: File) {
+    setPhase("uploading");
+    setError(null);
+    setUploadPct(0);
+    const fd = new FormData();
+    fd.append("audio", file);
+    fd.append("durationSec", "0");
+    if (mode === "journal") fd.append("date", new Date().toISOString().slice(0, 10));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", cfg.endpoint);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setPhase("done");
+      } else {
+        let msg = `Upload selhal (HTTP ${xhr.status})`;
+        try { msg = JSON.parse(xhr.responseText)?.error ?? msg; } catch { /* not json */ }
+        setPhase("error");
+        setError(msg);
+      }
+    };
+    xhr.onerror = () => { setPhase("error"); setError("Upload selhal — síťová chyba. Zkus to znovu."); };
+    xhr.send(fd);
   }
 
   const remainMs = Math.max(0, limitSec * 1000 - elapsedMs);
@@ -335,11 +362,34 @@ export default function DiktatRecorder() {
           <>
             <Loader2 className="size-12 animate-spin" style={{ color: cfg.color }} />
             <div className="text-base font-medium">
-              {phase === "uploading" ? "Nahrávám…" : "Otevírám…"}
+              {phase === "uploading" ? `Nahrávám… ${uploadPct}%` : "Otevírám…"}
             </div>
+            {phase === "uploading" && (
+              <div className="w-full max-w-xs h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full transition-all" style={{ width: `${uploadPct}%`, background: cfg.color }} />
+              </div>
+            )}
             <div className="text-xs text-muted-foreground">
-              {phase === "uploading" ? "audio na server" : "AI běží na pozadí"}
+              {phase === "uploading" ? "audio na server — nezavírej stránku" : "AI běží na pozadí"}
             </div>
+          </>
+        )}
+
+        {phase === "done" && (
+          <>
+            <div className="size-20 rounded-full bg-[var(--tint-sage)]/20 grid place-items-center">
+              <Check className="size-10 text-[var(--tint-sage)]" />
+            </div>
+            <div className="text-base font-medium">Soubor nahrán</div>
+            <div className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+              AI ho zpracovává na pozadí — výsledek najdeš {mode === "task" ? <>v <a href="/ukoly" className="underline">Úkolech</a> („Čeká na review")</> : <>v <a href="/denik" className="underline">Deníku</a></>}.
+            </div>
+            <button
+              onClick={() => { setPhase("idle"); setElapsedMs(0); }}
+              className="mt-2 px-4 py-2 rounded-md hover:bg-white/5 text-sm"
+            >
+              Nahrát další
+            </button>
           </>
         )}
 

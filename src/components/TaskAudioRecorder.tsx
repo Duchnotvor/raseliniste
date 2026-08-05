@@ -127,8 +127,35 @@ export default function TaskAudioRecorder() {
     })();
   }
 
-  async function uploadFile(file: File) {
-    await upload(file, 0);
+  // FIX 2026-08-04 (Gideon: „absolutne nevidim jestli se soubor nahral,
+  // proste to neudela nic"): upload SOUBORU jde vlastní cestou s viditelným
+  // průběhem (%), Hotovo ✓ a chybou. Fire-and-forget bez UI zůstává jen
+  // pro diktování mikrofonem (vědomé rozhodnutí 2026-05-19).
+  const [uploadPct, setUploadPct] = useState(0);
+  function uploadFile(file: File) {
+    setPhase("uploading");
+    setError(null);
+    setUploadPct(0);
+    const fd = new FormData();
+    fd.append("audio", file);
+    fd.append("durationSec", "0");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/ukoly/audio");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setPhase("done");
+      } else {
+        let msg = `Upload selhal (HTTP ${xhr.status})`;
+        try { msg = JSON.parse(xhr.responseText)?.error ?? msg; } catch { /* not json */ }
+        setPhase("error");
+        setError(msg);
+      }
+    };
+    xhr.onerror = () => { setPhase("error"); setError("Upload selhal — síťová chyba. Zkus to znovu."); };
+    xhr.send(fd);
   }
 
   const remainMs = Math.max(0, limitSec * 1000 - elapsedMs);
@@ -260,8 +287,11 @@ export default function TaskAudioRecorder() {
         {phase === "uploading" && (
           <>
             <Loader2 className="size-12 animate-spin text-[var(--tint-peach)]" />
-            <div className="text-base font-medium">Nahrávám…</div>
-            <div className="text-xs text-muted-foreground">audio na server</div>
+            <div className="text-base font-medium">Nahrávám… {uploadPct}%</div>
+            <div className="w-full max-w-xs h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full bg-[var(--tint-peach)] transition-all" style={{ width: `${uploadPct}%` }} />
+            </div>
+            <div className="text-xs text-muted-foreground">audio na server — nezavírej stránku</div>
           </>
         )}
 
