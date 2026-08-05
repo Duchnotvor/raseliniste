@@ -28,7 +28,7 @@ const APP_URL = () => env.APP_URL || "https://www.raseliniste.cz";
 // ---------------------------------------------------------------------------
 
 export type BookingModeStr = "CLIENT" | "FRIEND";
-export type BookingMeetingTypeStr = "CHOICE_PRAGUE" | "CHOICE_ONLINE" | "CHOICE_HOME" | "CHOICE_ANY";
+export type BookingMeetingTypeStr = "CHOICE_PRAGUE" | "CHOICE_ONLINE" | "CHOICE_HOME" | "CHOICE_ANY" | "CHOICE_LUNCH_PRAGUE";
 
 export interface CreateInviteInput {
   contactId?: string | null;        // null = univerzální / cold lead

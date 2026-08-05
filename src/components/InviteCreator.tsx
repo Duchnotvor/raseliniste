@@ -21,11 +21,25 @@ interface InviteRow {
   slotDurationMin: number;
   status: string;
   validUntil: string;
+  availableFrom: string | null;
+  publicNote: string | null;
+  internalNote: string | null;
   inviteeName: string | null;
   inviteeEmail: string | null;
   reservedSlot: { startsAt: string; endsAt: string; type: string } | null;
   contact: { id: string; displayName: string } | null;
   createdAt: string;
+}
+
+/** Editace parametrů pozvánky, dokud si host nevybral termín (Gideon 2026-08-05) */
+interface EditForm {
+  mode: string;
+  meetingType: string;
+  slotDurationMin: string;
+  availableFrom: string; // YYYY-MM-DD | ""
+  validUntil: string;    // YYYY-MM-DD
+  publicNote: string;
+  internalNote: string;
 }
 
 const APP_URL_BASE = typeof window !== "undefined" ? window.location.origin : "";
@@ -65,6 +79,56 @@ export default function InviteCreator() {
   const [copied, setCopied] = useState(false);
 
   const [invites, setInvites] = useState<InviteRow[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaved, setEditSaved] = useState(false);
+
+  function startEdit(inv: InviteRow) {
+    setEditingId(inv.id);
+    setEditError(null);
+    setEditSaved(false);
+    setEditForm({
+      mode: inv.mode,
+      meetingType: inv.meetingType,
+      slotDurationMin: String(inv.slotDurationMin),
+      availableFrom: inv.availableFrom ? inv.availableFrom.slice(0, 10) : "",
+      validUntil: inv.validUntil ? inv.validUntil.slice(0, 10) : "",
+      publicNote: inv.publicNote ?? "",
+      internalNote: inv.internalNote ?? "",
+    });
+  }
+
+  async function saveEdit() {
+    if (!editingId || !editForm) return;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/booking/${editingId}/edit`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: editForm.mode,
+          meetingType: editForm.meetingType,
+          slotDurationMin: parseInt(editForm.slotDurationMin),
+          availableFrom: editForm.availableFrom || null,
+          validUntil: editForm.validUntil || undefined,
+          publicNote: editForm.publicNote || null,
+          internalNote: editForm.internalNote || null,
+        }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setEditError(d?.error ?? `Uložení selhalo (HTTP ${res.status})`); return; }
+      setEditSaved(true);
+      await loadInvites();
+      setTimeout(() => { setEditingId(null); setEditForm(null); setEditSaved(false); }, 900);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Síťová chyba");
+    } finally {
+      setEditBusy(false);
+    }
+  }
 
   useEffect(() => {
     void loadInvites();
@@ -452,6 +516,9 @@ export default function InviteCreator() {
               const isUniversal = !inv.contact && !inv.inviteeName;
               const isActive = inv.status !== "CANCELED" && inv.status !== "EXPIRED";
               const canResend = inv.status === "CONFIRMED" || inv.status === "RESERVED";
+              // Upravit lze, dokud si host nevybral termín
+              const canEdit = inv.status === "PENDING" || inv.status === "VIEWED";
+              const isEditing = editingId === inv.id && editForm !== null;
               return (
                 <div key={inv.id} className="rounded-lg border border-border bg-background p-4">
                   {/* Header: jméno + status (zalomené na mobilu) */}
@@ -502,6 +569,15 @@ export default function InviteCreator() {
                         <Mail className="size-4" /> Poslat mail
                       </button>
                     )}
+                    {canEdit && (
+                      <button
+                        onClick={() => (isEditing ? setEditingId(null) : startEdit(inv))}
+                        className="flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md border border-border bg-card hover:bg-accent text-foreground"
+                        title="Upravit parametry — jde to, dokud si host nevybral termín"
+                      >
+                        {isEditing ? "Zavřít úpravy" : "Upravit"}
+                      </button>
+                    )}
                     {/* Petr 2026-06-10: Diagnostika — proč mail nedorazil */}
                     <button
                       onClick={() => diagnoseInvite(inv.id)}
@@ -519,6 +595,104 @@ export default function InviteCreator() {
                       </button>
                     )}
                   </div>
+
+                  {/* Inline editace parametrů (jen PENDING/VIEWED) */}
+                  {isEditing && editForm && (
+                    <div className="mt-3 rounded-md border border-border bg-card p-3 space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="text-[10px] font-mono uppercase text-muted-foreground">Typ schůzky</label>
+                          <select
+                            value={editForm.meetingType}
+                            onChange={(e) => {
+                              const mt = e.target.value;
+                              setEditForm((f) => f && ({ ...f, meetingType: mt, slotDurationMin: mt === "CHOICE_LUNCH_PRAGUE" ? "90" : f.slotDurationMin }));
+                            }}
+                            className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                          >
+                            <option value="CHOICE_ANY">Nechám na hostovi</option>
+                            <option value="CHOICE_PRAGUE">Osobně v Praze</option>
+                            <option value="CHOICE_ONLINE">Online</option>
+                            <option value="CHOICE_HOME">U mě (Třebíč)</option>
+                            <option value="CHOICE_LUNCH_PRAGUE">Oběd v Praze (90 min)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-mono uppercase text-muted-foreground">Délka</label>
+                          <select
+                            value={editForm.slotDurationMin}
+                            onChange={(e) => setEditForm((f) => f && ({ ...f, slotDurationMin: e.target.value }))}
+                            disabled={editForm.meetingType === "CHOICE_LUNCH_PRAGUE"}
+                            className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm disabled:opacity-60"
+                          >
+                            {["30", "45", "60", "90", "120"].map((d) => <option key={d} value={d}>{d} min</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-mono uppercase text-muted-foreground">Vztah</label>
+                          <select
+                            value={editForm.mode}
+                            onChange={(e) => setEditForm((f) => f && ({ ...f, mode: e.target.value }))}
+                            className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                          >
+                            <option value="CLIENT">Klient</option>
+                            <option value="FRIEND">Přítel</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-mono uppercase text-muted-foreground">Sloty od</label>
+                          <input
+                            type="date"
+                            value={editForm.availableFrom}
+                            onChange={(e) => setEditForm((f) => f && ({ ...f, availableFrom: e.target.value }))}
+                            className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-mono uppercase text-muted-foreground">Platnost do</label>
+                          <input
+                            type="date"
+                            value={editForm.validUntil}
+                            onChange={(e) => setEditForm((f) => f && ({ ...f, validUntil: e.target.value }))}
+                            className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono uppercase text-muted-foreground">Veřejná poznámka (host ji uvidí)</label>
+                        <textarea
+                          value={editForm.publicNote}
+                          onChange={(e) => setEditForm((f) => f && ({ ...f, publicNote: e.target.value }))}
+                          rows={2}
+                          className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-mono uppercase text-muted-foreground">Interní poznámka (jen pro tebe)</label>
+                        <input
+                          value={editForm.internalNote}
+                          onChange={(e) => setEditForm((f) => f && ({ ...f, internalNote: e.target.value }))}
+                          className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                        />
+                      </div>
+                      {editError && <div className="text-sm text-destructive">{editError}</div>}
+                      <div className="flex items-center gap-2">
+                        <Button onClick={saveEdit} disabled={editBusy}>
+                          {editBusy ? <Loader2 className="size-4 animate-spin" /> : editSaved ? <Check className="size-4" /> : null}
+                          {editSaved ? "Uloženo" : "Uložit změny"}
+                        </Button>
+                        <button
+                          onClick={() => { setEditingId(null); setEditForm(null); }}
+                          className="text-sm text-muted-foreground hover:text-foreground px-2 py-1"
+                        >
+                          Zrušit
+                        </button>
+                        <span className="text-[11px] text-muted-foreground ml-auto">
+                          Odkaz zůstává stejný — host uvidí nové parametry hned.
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

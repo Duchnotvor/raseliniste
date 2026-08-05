@@ -9,7 +9,9 @@ export const prerender = false;
 const schema = z.object({
   contactId: z.string().nullable().optional(),
   mode: z.enum(["CLIENT", "FRIEND"]),
-  meetingType: z.enum(["CHOICE_PRAGUE", "CHOICE_ONLINE", "CHOICE_HOME", "CHOICE_ANY"]),
+  // FIX 2026-08-05: chyběl CHOICE_LUNCH_PRAGUE (typ existuje od 2026-06-19)
+  // — vytvoření pozvánky „Oběd v Praze" padalo na 400 invalid input.
+  meetingType: z.enum(["CHOICE_PRAGUE", "CHOICE_ONLINE", "CHOICE_HOME", "CHOICE_ANY", "CHOICE_LUNCH_PRAGUE"]),
   slotDurationMin: z.number().int().min(15).max(240).optional(),
   validityDays: z.number().int().min(1).max(90).optional(),
   internalNote: z.string().max(500).optional(),
