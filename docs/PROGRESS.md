@@ -4,6 +4,44 @@
 > a ví kde se skončilo. Detail jednotlivých session bloků v
 > `INSTRUKCE/HANDOFF-*.md` a v memory souborech.
 
+## Session 2026-08-05 → 08-06 — Booking editace, Meet per projekt, MEET dlaždice, GitHub výpadek
+
+**Booking** — editace parametrů pozvánky, dokud si host nevybral termín
+(PENDING/VIEWED): tlačítko Upravit + inline form (typ/délka/vztah/sloty od/
+platnost/poznámky), PATCH /api/booking/:id/edit. FIX latentní bug: POST
+invite schéma neznalo CHOICE_LUNCH_PRAGUE → pozvánka „Oběd v Praze"
+padala na 400 (typ existoval od 6/2026).
+
+**Ozvěna** — upload audio SOUBORU má konečně viditelný průběh (XHR %,
+„Soubor nahrán ✓", chyba + retry); sdílel tichou fire-and-forget cestu
+diktování a nedělal „nic". Diktování mikrofonem beze změny (záměr 5/2026).
+
+**Meet** — místnost per projekt (studánka i prskavka): karta v detailu
+projektu, Vytvořit místnost (spaces.create + auto-recording, 3. scope
+meetings.space.created = další reauth) nebo navázat link; přepisy z
+navázané místnosti se AUTO-přiřazují do projektu (bez inboxu). MeetSpace
++ projectId + spaceName (join na conferenceRecords).
+
+**MEET dlaždice** — PageLink.section="MEET": v Page Links sekce
+JMÉNO + link místnosti, na /start sekce „Meet — připojit se" (klik =
+otevřít schůzku). iOS PWA x-safari handler přesunut Shell→Base (start_url
+ho neměl!). POZOR: sekce na /start se vykreslí až po vytvoření 1. odkazu.
+
+**SRO Manager (jiné repo)** — rozpočty: jednotka položky sleduje účtování
+(ročně→rok…), jednotka nově editovatelná; konec „1 měsíc · ročně" v PDF.
+
+**GitHub výpadek 6. 8.** — Actions „job not acquired by hosted runner"
+(oficiální incident). Nouzový deploy: lokální `docker buildx build
+--platform linux/amd64` → save/gzip → File Station na NAS → `docker load`
++ `docker tag <img> ghcr.io/...:latest` + `compose up -d`. Další normální
+pull to přepíše. LEKCE: ověřování prod verze porovnáním hashů lokálního
+dist je NEspolehlivé (hash drift lokál vs Docker build) — správně vytáhnout
+jména assetů z image (`docker run --rm <img> ls dist/client/_astro`) a ta
+probnout na proti produkci.
+
+Commity: 7505d82 … f8546df (+ sro-manager 161f04a).
+
+
 ## Session 2026-08-01 → 08-04 — Trencadís board, Meet přepisy, definitivní kontakty
 
 **Gidiho Týden (trencadís board)** — /planovani kompletně nahrazeno vizuálem

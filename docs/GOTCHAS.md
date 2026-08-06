@@ -1060,3 +1060,22 @@ bez www prefixu.
 Extrakce PDF žila jen v paměti — restart NASu nechal report „processing"
 navždy (UI polluje do nekonečna). Každý fire-and-forget status v DB potřebuje
 self-heal (labs: processing >15 min → error při GET listu) nebo retry UI.
+
+
+## Ověřování nasazené verze — hash probe je past (2026-08-06)
+
+Porovnávat jména assetů z LOKÁLNÍHO dist proti prod `/_astro/` nefunguje
+spolehlivě — hash drift mezi lokálním a Docker buildem (jiné prostředí →
+jiné chunk hashe u VŠECH souborů). Falešně to hlásí „stará verze".
+Správně: `docker run --rm --entrypoint sh <image> -c "ls dist/client/_astro"`
+→ probnout TA jména. Nebo `docker exec raseliniste_app ls dist/client/_astro`.
+
+## Nouzový deploy bez GitHub Actions (2026-08-06, výpadek GitHubu)
+
+1. Mac: `docker buildx build --platform linux/amd64 -t raseliniste-app:local-<sha> --load .`
+2. `docker save ... | gzip > ~/Desktop/x.tar.gz` → File Station do
+   /volume1/docker/raseliniste (SSH root@spiz z Macu heslem NEfunguje).
+3. NAS: `gunzip -c x.tar.gz | docker load && docker tag raseliniste-app:local-<sha>
+   ghcr.io/mediaface-full/raseliniste/app:latest && docker compose up -d`
+4. Další běžný `compose pull` (až je GH zelený) lokální tag přepíše — bez úklidu.
+   POZOR: nepullovat, dokud GH nemá build novějšího commitu (downgrade!).
