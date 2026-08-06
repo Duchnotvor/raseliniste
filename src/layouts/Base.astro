@@ -91,5 +91,37 @@ const ogImageUrl = ogImagePath.startsWith("http") ? ogImagePath : `${baseUrl}${o
   </head>
   <body class="min-h-screen bg-base-100 text-base-content antialiased">
     <slot />
+
+    {/* Petr 2026-07-24 (přesun ze Shell 2026-08-06, ať platí i pro /start
+        a veřejné stránky): v iOS PWA se externí odkazy otvíraly v in-app
+        Safari sheetu. Klik na externí https odkaz → x-safari-https://
+        scheme (iOS 17+) = skutečné Safari. Capture fáze předběhne i React
+        onClick. Mimo iOS standalone se nic nemění. iPadOS = Macintosh UA
+        + maxTouchPoints. */}
+    <script>
+      const isIosDevice =
+        /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+        (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1);
+      const iosPwa =
+        isIosDevice &&
+        ((navigator as { standalone?: boolean }).standalone === true ||
+          matchMedia("(display-mode: standalone)").matches);
+      if (iosPwa) {
+        document.addEventListener(
+          "click",
+          (e) => {
+            const target = e.target as Element | null;
+            const a = target?.closest?.('a[href^="https://"]') as HTMLAnchorElement | null;
+            if (!a) return;
+            const strip = (h: string) => h.replace(/^www\./, "");
+            if (strip(a.hostname) === strip(location.hostname)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            location.href = "x-safari-https://" + a.href.slice("https://".length);
+          },
+          true,
+        );
+      }
+    </script>
   </body>
 </html>

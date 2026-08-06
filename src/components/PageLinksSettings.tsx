@@ -10,6 +10,8 @@ interface PageLink {
   tint: string;
   icon: string | null;
   order: number;
+  // Gideon 2026-08-06: "MEET" = sekce rychlého připojení (dlaždice na /start)
+  section: string | null;
 }
 
 const TINTS = ["peach", "mint", "lavender", "sky", "sage", "butter", "rose", "pink"] as const;
@@ -45,6 +47,7 @@ export default function PageLinksSettings() {
   const [newUrl, setNewUrl] = useState("");
   const [newTint, setNewTint] = useState<Tint>("sky");
   const [newIcon, setNewIcon] = useState("");
+  const [newSection, setNewSection] = useState<"" | "MEET">("");
 
   useEffect(() => { void load(); }, []);
 
@@ -75,6 +78,7 @@ export default function PageLinksSettings() {
           url: newUrl,
           tint: newTint,
           icon: newIcon.trim() || null,
+          section: newSection || null,
         }),
       });
       const data = await res.json();
@@ -87,6 +91,7 @@ export default function PageLinksSettings() {
       setNewUrl("");
       setNewTint("sky");
       setNewIcon("");
+      setNewSection("");
       setCreating(false);
     } finally {
       setBusy(null);
@@ -153,6 +158,20 @@ export default function PageLinksSettings() {
             <TintPicker value={newTint} onChange={setNewTint} />
           </div>
           <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono block mb-1">Sekce</label>
+            <select
+              value={newSection}
+              onChange={(e) => setNewSection(e.target.value as "" | "MEET")}
+              className="w-full px-3 py-2 rounded-md bg-black/30 border border-white/10 text-sm"
+            >
+              <option value="">Běžný odkaz (sidebar)</option>
+              <option value="MEET">MEET — rychlé připojení (dlaždice na /start)</option>
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              MEET: název = jméno člověka/klienta, URL = link jeho Meet místnosti. Klik na /start rovnou otevře schůzku.
+            </p>
+          </div>
+          <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
               Ikona (volitelně) — lowercase, kebab-case z{" "}
               <a href="https://lucide.dev/icons" target="_blank" rel="noopener" className="underline text-[var(--tint-sky)]">
@@ -181,16 +200,39 @@ export default function PageLinksSettings() {
           Zatím žádné odkazy. Klikni „Nový odkaz" výše.
         </div>
       ) : (
-        <div className="space-y-2">
-          {links.map((link) => (
-            <PageLinkRow
-              key={link.id}
-              link={link}
-              busy={busy === link.id}
-              onUpdate={(patch) => update(link.id, patch)}
-              onRemove={() => remove(link.id)}
-            />
-          ))}
+        <div className="space-y-4">
+          {links.some((l) => l.section === "MEET") && (
+            <div className="space-y-2">
+              <div className="text-[11px] uppercase tracking-widest font-mono text-muted-foreground px-1">
+                MEET — rychlé připojení (na /start)
+              </div>
+              {links.filter((l) => l.section === "MEET").map((link) => (
+                <PageLinkRow
+                  key={link.id}
+                  link={link}
+                  busy={busy === link.id}
+                  onUpdate={(patch) => update(link.id, patch)}
+                  onRemove={() => remove(link.id)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="space-y-2">
+            {links.some((l) => l.section === "MEET") && (
+              <div className="text-[11px] uppercase tracking-widest font-mono text-muted-foreground px-1">
+                Běžné odkazy
+              </div>
+            )}
+            {links.filter((l) => l.section !== "MEET").map((link) => (
+              <PageLinkRow
+                key={link.id}
+                link={link}
+                busy={busy === link.id}
+                onUpdate={(patch) => update(link.id, patch)}
+                onRemove={() => remove(link.id)}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -210,9 +252,11 @@ function PageLinkRow({
   const [url, setUrl] = useState(link.url);
   const [tint, setTint] = useState<Tint>(link.tint as Tint);
   const [icon, setIcon] = useState(link.icon ?? "");
+  const [section, setSection] = useState<"" | "MEET">(link.section === "MEET" ? "MEET" : "");
 
   function save() {
     onUpdate({
+      section: section || null,
       name: name.trim() || link.name,
       url: url.trim() || link.url,
       tint,
@@ -267,6 +311,14 @@ function PageLinkRow({
       <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="URL" />
       <TintPicker value={tint} onChange={setTint} />
       <Input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="Ikona (volitelně, lucide name)" />
+      <select
+        value={section}
+        onChange={(e) => setSection(e.target.value as "" | "MEET")}
+        className="w-full px-3 py-2 rounded-md bg-black/30 border border-white/10 text-sm"
+      >
+        <option value="">Běžný odkaz</option>
+        <option value="MEET">MEET — rychlé připojení (/start)</option>
+      </select>
       <div className="flex gap-2">
         <Button size="sm" onClick={save}><Check /> Uložit</Button>
         <Button size="sm" variant="ghost" onClick={() => setEditing(false)}><X /> Zrušit</Button>

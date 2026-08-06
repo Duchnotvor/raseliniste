@@ -13,6 +13,8 @@ const CreateBody = z.object({
   tint: z.enum(ALLOWED_TINTS).default("sky"),
   icon: z.string().max(60).optional().nullable(),
   order: z.number().int().optional(),
+  // Gideon 2026-08-06: "MEET" = sekce rychlého připojení (dlaždice na /start)
+  section: z.enum(["MEET"]).optional().nullable(),
 });
 
 /**
@@ -59,6 +61,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       tint: parsed.data.tint,
       icon: parsed.data.icon?.trim() || null,
       order,
+      section: parsed.data.section ?? null,
     },
   });
 

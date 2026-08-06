@@ -1967,6 +1967,9 @@ model PageLink {
   // Volitelná lucide icon name (např. "globe", "book"); default null = generic globe
   icon      String?
   order     Int      @default(0)
+  // Gideon 2026-08-06: sekce odkazů. null = běžné Page Links; "MEET" =
+  // rychlé připojení do Meet místností (jméno + link) — dlaždice na /start.
+  section   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -13,6 +13,7 @@ const PatchBody = z.object({
   tint: z.enum(ALLOWED_TINTS).optional(),
   icon: z.string().max(60).nullable().optional(),
   order: z.number().int().optional(),
+  section: z.enum(["MEET"]).optional().nullable(),
 });
 
 /**
@@ -42,6 +43,7 @@ export const PATCH: APIRoute = async ({ request, params, cookies }) => {
   if (parsed.data.tint !== undefined) data.tint = parsed.data.tint;
   if (parsed.data.icon !== undefined) data.icon = parsed.data.icon?.trim() || null;
   if (parsed.data.order !== undefined) data.order = parsed.data.order;
+  if (parsed.data.section !== undefined) data.section = parsed.data.section;
 
   const updated = await prisma.pageLink.update({ where: { id }, data });
   return Response.json({ link: updated });
