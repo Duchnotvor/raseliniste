@@ -178,9 +178,18 @@ export async function healMeetSpaces(userId: string, token: string): Promise<voi
         const body = await res.text().catch(() => "");
         throw new Error(`spaces.patch ${res.status}: ${body.slice(0, 250)}`);
       }
+      // Response nese resource name "spaces/xxx" — join klíč na conference
+      // records (auto-přiřazení do projektu). Uložit při každém healu.
+      const space = await res.json().catch(() => null) as { name?: string; meetingCode?: string } | null;
       await prisma.meetSpace.update({
         where: { id: s.id },
-        data: { autoRecordOk: true, lastHealAt: new Date(), lastError: null },
+        data: {
+          autoRecordOk: true,
+          lastHealAt: new Date(),
+          lastError: null,
+          spaceName: space?.name ?? s.spaceName,
+          meetingCode: space?.meetingCode ?? s.meetingCode,
+        },
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -191,6 +200,98 @@ export async function healMeetSpaces(userId: string, token: string): Promise<voi
       }).catch(() => null);
     }
   }
+}
+
+/**
+ * Vytvoří NOVOU Meet místnost (spaces.create, scope meetings.space.created)
+ * s auto-recordingem a naváže ji na projekt (Gideon 2026-08-05: „chci každý
+ * mít pro jednotlivé studánky, samostatný link — a to samé do Prskavky").
+ */
+export async function createMeetSpace(
+  userId: string,
+  opts: { projectId?: string | null; label?: string | null },
+): Promise<{ id: string; meetingCode: string; url: string }> {
+  const client = await (await import("./google-oauth")).getAuthorizedClient(userId);
+  const { token } = await client.getAccessToken();
+  if (!token) throw new Error("Google access token se nepodařilo získat.");
+
+  const res = await fetch(`${MEET_API}/spaces`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      config: { artifactConfig: { recordingConfig: { autoRecordingGeneration: "ON" } } },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`spaces.create ${res.status}: ${body.slice(0, 300)}`);
+  }
+  const space = await res.json() as { name?: string; meetingCode?: string; meetingUri?: string };
+  if (!space.meetingCode) throw new Error("Meet API nevrátil meetingCode.");
+
+  const row = await prisma.meetSpace.create({
+    data: {
+      userId,
+      meetingCode: space.meetingCode,
+      spaceName: space.name ?? null,
+      projectId: opts.projectId ?? null,
+      label: opts.label ?? null,
+      autoRecordOk: true,
+      lastHealAt: new Date(),
+    },
+  });
+  return { id: row.id, meetingCode: space.meetingCode, url: space.meetingUri ?? `https://meet.google.com/${space.meetingCode}` };
+}
+
+/**
+ * Přiřazení hotového MeetNote do projektu — vytvoří ProjectRecording
+ * (zápis + plný přepis) a spustí analýzu + RAG. Sdílí ruční endpoint
+ * i AUTO-přiřazení podle místnosti projektu.
+ */
+export async function assignMeetNoteToProject(userId: string, noteId: string, projectId: string): Promise<{ ok: boolean; error?: string; recordingId?: string }> {
+  const note = await prisma.meetNote.findFirst({ where: { id: noteId, userId, deleted: false } });
+  if (!note) return { ok: false, error: "Zápis nenalezen." };
+  if (note.status !== "done" || !note.transcript) return { ok: false, error: "Zápis ještě není zpracovaný." };
+  if (note.recordingId) return { ok: false, error: "Už je přiřazený." };
+
+  const project = await prisma.projectBox.findFirst({
+    where: { id: projectId, userId },
+    select: { id: true, description: true, studnaStandardPrompt: true, analysisModel: true },
+  });
+  if (!project) return { ok: false, error: "Projekt nenalezen." };
+
+  const dateLabel = note.startedAt.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
+  const title = `Meet ${dateLabel}${note.eventTitle ? ` — ${note.eventTitle}` : ""}`;
+  const fullText = note.summaryMd
+    ? `${note.summaryMd}\n\n---\n\n## Plný přepis\n\n${note.transcript}`
+    : note.transcript;
+
+  const recording = await prisma.projectRecording.create({
+    data: {
+      projectId: project.id,
+      isOwner: true,
+      authorName: "Google Meet",
+      type: "UPLOAD",
+      transcript: fullText,
+      uploadedFilename: title,
+      status: "processing",
+    },
+  });
+  await prisma.meetNote.update({
+    where: { id: note.id },
+    data: { projectId: project.id, recordingId: recording.id },
+  });
+
+  const { processRecordingFromText } = await import("./process-recording");
+  void processRecordingFromText({
+    recordingId: recording.id,
+    transcript: fullText,
+    type: "STANDARD",
+    projectContext: project.description,
+    customStandardPrompt: project.studnaStandardPrompt,
+    analysisModel: project.analysisModel,
+  });
+  return { ok: true, recordingId: recording.id };
 }
 
 /** Stáhne mp4 z Drive, vytáhne audio, přepíše a udělá strukturovaný zápis. */
@@ -221,7 +322,7 @@ async function processMeetNote(userId: string, noteId: string, token: string, dr
     const audio = await readFile(outPath);
 
     // 3) Přepis (Gemini; Files API pro velké soubory)
-    const note = await prisma.meetNote.findUnique({ where: { id: noteId }, select: { startedAt: true, endedAt: true } });
+    const note = await prisma.meetNote.findUnique({ where: { id: noteId }, select: { startedAt: true, endedAt: true, spaceName: true } });
     const { transcript } = await transcribeAudioOnly({ audio, mimeType: "audio/mpeg" });
 
     // 4) Strukturovaný zápis (markdown — dle vzoru z návodu)
@@ -250,6 +351,19 @@ async function processMeetNote(userId: string, noteId: string, token: string, dr
       data: { status: "done", processingError: null, transcript, summaryMd, eventTitle },
     });
     console.log(`[meet-sync] ${noteId} hotovo (${transcript.length} znaků přepisu)`);
+
+    // AUTO-přiřazení: schůzka z místnosti navázané na projekt (Gideon
+    // 2026-08-05) jde rovnou do studánky/prskavky — inbox přeskočí.
+    if (note?.spaceName) {
+      const boundSpace = await prisma.meetSpace.findFirst({
+        where: { userId, spaceName: note.spaceName, projectId: { not: null } },
+        select: { projectId: true },
+      });
+      if (boundSpace?.projectId) {
+        const r = await assignMeetNoteToProject(userId, noteId, boundSpace.projectId);
+        console.log(`[meet-sync] ${noteId} auto-přiřazen do projektu ${boundSpace.projectId}: ${r.ok ? "OK" : r.error}`);
+      }
+    }
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => null);
   }

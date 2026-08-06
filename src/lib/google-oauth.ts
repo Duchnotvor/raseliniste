@@ -37,12 +37,16 @@ export const GOOGLE_SCOPES = [
   // Auto-zapínání nahrávání registrovaných místností (spaces.patch —
   // autoRecordingGeneration=ON; Gideon 2026-08-04 „tohle chci hned")
   "https://www.googleapis.com/auth/meetings.space.settings",
+  // Vytváření místností per studánka (spaces.create — Gideon 2026-08-05)
+  "https://www.googleapis.com/auth/meetings.space.created",
 ];
 
 /** Scope potřebný pro Meet přepisy (banner „rozšířit oprávnění") */
 export const MEET_REQUIRED_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly";
 /** Scope pro auto-recording místností (spaces.patch) */
 export const MEET_SETTINGS_SCOPE = "https://www.googleapis.com/auth/meetings.space.settings";
+/** Scope pro vytváření místností (spaces.create) */
+export const MEET_CREATE_SCOPE = "https://www.googleapis.com/auth/meetings.space.created";
 
 /** Klíčový scope který signalizuje že Pošta může fungovat. Bez něj jen kalendář/kontakty. */
 export const POSTA_REQUIRED_SCOPE = "https://www.googleapis.com/auth/gmail.modify";

@@ -899,6 +899,7 @@ model ProjectBox {
   externalClientRef String?
 
   meetNotes         MeetNote[]
+  meetSpacesBound   MeetSpace[]
 
   // Prskavka modul = osobní projekty (knížky, nápady, soukromé tvoření).
   // false = klasická Studánka (sdílená s klienty), true = Prskavka (jen Petr).
@@ -1022,12 +1023,22 @@ model MeetSpace {
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   meetingCode   String   // "abc-defg-hij" (z meet.google.com/abc-defg-hij)
   label         String?  // volitelný popisek ("Avecomp porady")
+
+  // Gideon 2026-08-05: místnost per studánka/prskavka — schůzky z ní se
+  // po přepisu AUTO-přiřadí do projektu (žádný inbox krok).
+  projectId     String?
+  project       ProjectBox? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  // Resource name "spaces/xxx" z Meet API — join klíč na conferenceRecords
+  // (ty vrací space resource, ne meeting code). Plní heal/create.
+  spaceName     String?
+
   autoRecordOk  Boolean  @default(false) // poslední self-heal prošel
   lastHealAt    DateTime?
   lastError     String?
   createdAt     DateTime @default(now())
 
   @@unique([userId, meetingCode])
+  @@index([userId, spaceName])
 }
 
 model GuestUser {

@@ -194,8 +194,26 @@ export default function MeetInbox() {
               zapíná automatické nahrávání — schůzka se pak nahraje i bez kliknutí na Record.
             </div>
             {spaces.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 text-sm rounded-md border border-border px-3 py-1.5">
-                <span className="font-mono text-xs">{s.meetingCode}</span>
+              <div key={s.id} className="flex items-center gap-2 text-sm rounded-md border border-border px-3 py-1.5 flex-wrap">
+                {/* Gideon 2026-08-05: „kde najdu link na ten meet?" — kód je
+                    klikací odkaz do schůzky + tlačítko na zkopírování linku */}
+                <a
+                  href={`https://meet.google.com/${s.meetingCode}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-xs underline underline-offset-2 hover:text-foreground"
+                  title="Otevřít schůzku"
+                >meet.google.com/{s.meetingCode}</a>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    void navigator.clipboard.writeText(`https://meet.google.com/${s.meetingCode}`);
+                    const b = e.currentTarget;
+                    b.textContent = "✓ zkopírováno";
+                    setTimeout(() => { b.textContent = "kopírovat link"; }, 2000);
+                  }}
+                  className="text-[11px] font-mono text-muted-foreground hover:text-foreground border border-border rounded px-1.5 py-0.5"
+                >kopírovat link</button>
                 {s.label && <span className="text-muted-foreground text-xs truncate">{s.label}</span>}
                 {s.autoRecordOk ? (
                   <span className="inline-flex items-center gap-1 text-[11px] font-mono text-[var(--tint-sage)] ml-auto"><Check className="size-3" /> nahrávání zapnuto</span>

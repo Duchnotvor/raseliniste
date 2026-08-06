@@ -7,6 +7,7 @@ import {
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import OwnerRecorder from "./OwnerRecorder";
+import ProjectMeetRoom from "./ProjectMeetRoom";
 
 interface ProjectDetail {
   id: string;
@@ -136,6 +137,9 @@ export default function StudnaDetail({ projectId, ownerName }: { projectId: stri
           ⚙ Tento projekt používá vlastní AI prompty (Studna Standard{project.studnaStandardPrompt ? " " : ""}{project.studnaBriefPrompt ? ", Brief " : ""})
         </div>
       )}
+
+      {/* Meet místnost projektu — přepisy schůzek z ní padají sem (2026-08-05) */}
+      <ProjectMeetRoom projectId={project.id} projectName={project.name} />
 
       {/* Tabs */}
       <div className="glass rounded-xl p-1.5 flex gap-1">

@@ -6,13 +6,23 @@ import { readSession } from "@/lib/session";
 export const prerender = false;
 
 /**
- * Registrované Meet místnosti s auto-recordingem (Gideon 2026-08-04).
- * GET list · POST přidat (meeting code nebo celý link) · DELETE ?id= odebrat.
- * Self-heal (spaces.patch → auto-recording ON) dělá cron meet-sync;
- * POST ho rovnou zkusí, ať je výsledek vidět hned.
+ * Meet místnosti (Gideon 2026-08-04/05).
+ * GET  — seznam (?projectId= filtruje na místnosti projektu)
+ * POST — { code, label?, projectId? } registrace existujícího linku
+ *        NEBO { createNew: true, projectId?, label? } → spaces.create
+ *        (nová místnost s auto-recordingem, navázaná na projekt)
+ * DELETE ?id= — odebrat registraci (místnost u Googlu žije dál)
+ *
+ * Místnost navázaná na projekt = přepisy schůzek z ní se AUTO-přiřazují
+ * do projektu (studánka i prskavka).
  */
 
-const AddBody = z.object({ code: z.string().min(3).max(200), label: z.string().max(120).optional() });
+const AddBody = z.object({
+  code: z.string().min(3).max(200).optional(),
+  label: z.string().max(120).optional(),
+  projectId: z.string().optional().nullable(),
+  createNew: z.boolean().optional(),
+});
 
 /** "https://meet.google.com/abc-defg-hij?x=1" | "abc-defg-hij" → "abc-defg-hij" */
 function parseMeetingCode(input: string): string | null {
@@ -20,12 +30,14 @@ function parseMeetingCode(input: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-export const GET: APIRoute = async ({ cookies }) => {
+export const GET: APIRoute = async ({ url, cookies }) => {
   const session = await readSession(cookies);
   if (!session) return Response.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+  const projectId = url.searchParams.get("projectId");
   const spaces = await prisma.meetSpace.findMany({
-    where: { userId: session.uid },
+    where: { userId: session.uid, ...(projectId ? { projectId } : {}) },
     orderBy: { createdAt: "asc" },
+    include: { project: { select: { id: true, name: true } } },
   });
   return Response.json({ ok: true, spaces });
 };
@@ -36,16 +48,47 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
   const parsed = AddBody.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return Response.json({ error: "INVALID_INPUT" }, { status: 400 });
+
+  // Ownership check projektu (pokud se váže)
+  if (parsed.data.projectId) {
+    const p = await prisma.projectBox.findFirst({ where: { id: parsed.data.projectId, userId: session.uid }, select: { id: true } });
+    if (!p) return Response.json({ error: "Projekt nenalezen." }, { status: 404 });
+  }
+
+  // Varianta A: vytvořit novou místnost přes Meet API
+  if (parsed.data.createNew) {
+    try {
+      const { createMeetSpace } = await import("@/lib/meet-sync");
+      const created = await createMeetSpace(session.uid, {
+        projectId: parsed.data.projectId ?? null,
+        label: parsed.data.label?.trim() || null,
+      });
+      const fresh = await prisma.meetSpace.findUnique({
+        where: { id: created.id },
+        include: { project: { select: { id: true, name: true } } },
+      });
+      return Response.json({ ok: true, space: fresh, url: created.url });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return Response.json({ error: `Vytvoření místnosti selhalo: ${msg.slice(0, 300)}` }, { status: 500 });
+    }
+  }
+
+  // Varianta B: registrace existujícího linku
+  if (!parsed.data.code) return Response.json({ error: "Chybí link/kód místnosti." }, { status: 400 });
   const code = parseMeetingCode(parsed.data.code);
   if (!code) return Response.json({ error: "Nepoznávám meeting kód — vlož link meet.google.com/xxx-xxxx-xxx nebo samotný kód." }, { status: 400 });
 
   const space = await prisma.meetSpace.upsert({
     where: { userId_meetingCode: { userId: session.uid, meetingCode: code } },
-    create: { userId: session.uid, meetingCode: code, label: parsed.data.label?.trim() || null },
-    update: { label: parsed.data.label?.trim() || undefined },
+    create: { userId: session.uid, meetingCode: code, label: parsed.data.label?.trim() || null, projectId: parsed.data.projectId ?? null },
+    update: {
+      label: parsed.data.label?.trim() || undefined,
+      ...(parsed.data.projectId !== undefined ? { projectId: parsed.data.projectId } : {}),
+    },
   });
 
-  // Zkus heal hned — ať Gideon vidí výsledek bez čekání na cron
+  // Zkus heal hned — ať je výsledek vidět bez čekání na cron
   try {
     const { getAuthorizedClient } = await import("@/lib/google-oauth");
     const { healMeetSpaces } = await import("@/lib/meet-sync");
@@ -56,7 +99,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     console.warn("[meet-spaces] okamžitý heal selhal:", e instanceof Error ? e.message : e);
   }
 
-  const fresh = await prisma.meetSpace.findUnique({ where: { id: space.id } });
+  const fresh = await prisma.meetSpace.findUnique({
+    where: { id: space.id },
+    include: { project: { select: { id: true, name: true } } },
+  });
   return Response.json({ ok: true, space: fresh });
 };
 
