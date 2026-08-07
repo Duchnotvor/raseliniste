@@ -74,6 +74,16 @@ function applySecurityHeaders(response: Response): Response {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
     if (!response.headers.has(k)) response.headers.set(k, v);
   }
+  // Gideon 2026-08-07 („furt to nevidim"): SSR HTML se posílalo BEZ
+  // Cache-Control → iOS/Safari si stránky heuristicky kešoval a po deployi
+  // ukazoval staré UI i přes restart PWA. HTML = vždy čerstvé; hashované
+  // /_astro assety si immutable cache naopak zaslouží (řeší se níž v
+  // isPublic větvi? ne — assety mají hash v názvu, prohlížeč si je
+  // revaliduje sám; no-store se na ně díky content-type NEaplikuje).
+  const ct = response.headers.get("content-type") ?? "";
+  if (ct.includes("text/html") && !response.headers.has("cache-control")) {
+    response.headers.set("cache-control", "no-store");
+  }
   return response;
 }
 
@@ -108,7 +118,13 @@ export const onRequest = defineMiddleware(async ({ request, cookies, url, redire
   if (apexRedir) return apexRedir;
 
   if (isPublic(url.pathname)) {
-    return applySecurityHeaders(await next());
+    const res = applySecurityHeaders(await next());
+    // Hashované assety (jméno se mění s obsahem) můžou kešovat navždy —
+    // zrychlí PWA a nikdy neukážou starou verzi (jiný obsah = jiné jméno).
+    if (url.pathname.startsWith("/_astro/") && !res.headers.has("cache-control")) {
+      res.headers.set("cache-control", "public, max-age=31536000, immutable");
+    }
+    return res;
   }
 
   const hasCookie = Boolean(cookies.get(SESSION_COOKIE)?.value);
