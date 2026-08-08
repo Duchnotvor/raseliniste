@@ -4,6 +4,35 @@
 > a ví kde se skončilo. Detail jednotlivých session bloků v
 > `INSTRUKCE/HANDOFF-*.md` a v memory souborech.
 
+## Session 2026-08-07 — cache fix, UX kolo, Meet zprovozňování
+
+**INCIDENT (zapsán i v memory):** „nevidím novou verzi" po deployi NIKDY
+nebyla uživatelova cache — SSR HTML se posílalo BEZ Cache-Control a
+Safari/iOS si stránky heuristicky kešoval. Stálo Gideona ~3 hodiny přes
+několik dní. FIX b25f00c: text/html → no-store, /_astro/* → immutable 1y.
+Pravidlo: dvě kola „zkus refresh" = stop, měřit `curl -I` hlavičky.
+
+**UX kolo dle feedbacku:**
+- Page Links: viditelné tlačítko „+ Meet dlaždice (na /start)" (sekce MEET
+  byla schovaná ve formuláři) + VŠECHNY externí odkazy = čisté <a>, o
+  otevření v pravém prohlížeči se stará JEN globální handler v Base
+  (lokální window.open hack smazán — dělal okno bez navigace).
+- Editor kontaktu: max-w-4xl, dva sloupce, sekce Identita / VIP a oslovení /
+  Routing / Narozeniny / Kontaktní údaje (EditorSection helper).
+
+**Meet zprovozňování (stav k tomuto okamžiku):**
+- reauth se VŠEMI 3 scopes hotový (chyba ACCESS_TOKEN_SCOPE_INSUFFICIENT
+  vyřešena reauthem).
+- GCP: OAuth klient žije v projektu **291437574022** — Gideon původně
+  zapnul Meet/Drive API v JINÉM projektu; správné enable odkazy s
+  ?project=291437574022 mu poslány, zapíná. Po enable ~2 min propagace →
+  „Vytvořit místnost" v projektu má projít.
+- Nasazeno ručně (lokální image f8546df přes File Station — GitHub měl
+  6. 8. výpadek Actions); GH build pak prošel, ghcr srovnané.
+
+Commity: b25f00c, ccd9be3, fef35fe, b93791a (+ docs).
+
+
 ## Session 2026-08-05 → 08-06 — Booking editace, Meet per projekt, MEET dlaždice, GitHub výpadek
 
 **Booking** — editace parametrů pozvánky, dokud si host nevybral termín
