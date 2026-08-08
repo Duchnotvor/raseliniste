@@ -153,7 +153,7 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
   return (
     <div className="modal-overlay" onClick={() => onClose(false)}>
       <div
-        className="modal-panel max-w-lg w-full max-h-[90vh] overflow-y-auto p-5 space-y-4"
+        className="modal-panel max-w-4xl w-full max-h-[90vh] overflow-y-auto p-5 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -163,7 +163,10 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
           </button>
         </div>
 
-        <div className="space-y-3">
+        {/* Gideon 2026-08-07: „roztáhnout do šířky, zpřehlednit" — dva sloupce
+            s pojmenovanými sekcemi místo jedné dlouhé nudle. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+          <EditorSection title="Identita" tint="butter">
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Celé jméno (zobrazované)</label>
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
@@ -178,55 +181,46 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
               <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
             </div>
           </div>
+          </EditorSection>
 
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-              Oslovení (5. pád) — jen VIP
+          <EditorSection title="VIP a oslovení" tint="rose">
+            <label className="flex items-center gap-2 cursor-pointer py-1">
+              <input type="checkbox" checked={isVip} onChange={(e) => setIsVip(e.target.checked)} className="size-4" />
+              <Star className="size-4" style={{ color: "var(--tint-rose)" }} fill={isVip ? "currentColor" : "none"} />
+              <span className="text-sm">VIP — firewall → zvláštní projekt + okamžitý email</span>
             </label>
-            <Input
-              value={firstNameVocative}
-              onChange={(e) => setFirstNameVocative(e.target.value)}
-              placeholder={firstName ? `např. „${firstName.endsWith("a") ? firstName.slice(0, -1) + "o" : firstName + "e"}"` : ""}
-            />
-            <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-              Pokud necháš prázdné, systém zkusí odhadnout. Vyplň jen u jmen co algoritmus zkazí.
-            </p>
-          </div>
-
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-[var(--tint-rose)] font-mono">
-              Vlastní oslovení — jen VIP (volitelné)
-            </label>
-            <Input
-              value={greetingOverride}
-              onChange={(e) => setGreetingOverride(e.target.value)}
-              placeholder='např. „Drahá dívko" nebo „Šéfe" nebo „Kamaráde"'
-            />
-            <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-              Když vyplníš, na /call-log VIP nahradí defaultní „Ahoj, {firstNameVocative || firstName || "Jméno"}". Celý styl je tvůj.
-            </p>
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer py-1">
-            <input type="checkbox" checked={isVip} onChange={(e) => setIsVip(e.target.checked)} className="size-4" />
-            <Star className="size-4" style={{ color: "var(--tint-rose)" }} fill={isVip ? "currentColor" : "none"} />
-            <span className="text-sm">VIP — firewall → zvláštní projekt + okamžitý email</span>
-          </label>
-
-          {contact?.isVip && contact?.id && (
-            <VipLinkSection contactId={contact.id} initialToken={contact.callLogToken} />
-          )}
-
-          {/* Smart routing — Tým + Klient */}
-          <div className="rounded-md p-3 space-y-2.5"
-            style={{
-              background: "color-mix(in oklch, var(--tint-mint) 5%, transparent)",
-              border: "1px solid color-mix(in oklch, var(--tint-mint) 20%, transparent)",
-            }}
-          >
-            <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
-              Routing úkolů do Todoistu
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+                Oslovení (5. pád) — jen VIP
+              </label>
+              <Input
+                value={firstNameVocative}
+                onChange={(e) => setFirstNameVocative(e.target.value)}
+                placeholder={firstName ? `např. „${firstName.endsWith("a") ? firstName.slice(0, -1) + "o" : firstName + "e"}"` : ""}
+              />
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                Pokud necháš prázdné, systém zkusí odhadnout. Vyplň jen u jmen co algoritmus zkazí.
+              </p>
             </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[var(--tint-rose)] font-mono">
+                Vlastní oslovení — jen VIP (volitelné)
+              </label>
+              <Input
+                value={greetingOverride}
+                onChange={(e) => setGreetingOverride(e.target.value)}
+                placeholder='např. „Drahá dívko" nebo „Šéfe" nebo „Kamaráde"'
+              />
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                Když vyplníš, na /call-log VIP nahradí defaultní „Ahoj, {firstNameVocative || firstName || "Jméno"}". Celý styl je tvůj.
+              </p>
+            </div>
+            {contact?.isVip && contact?.id && (
+              <VipLinkSection contactId={contact.id} initialToken={contact.callLogToken} />
+            )}
+          </EditorSection>
+
+          <EditorSection title="Routing úkolů do Todoistu" tint="mint">
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={isTeam} onChange={(e) => setIsTeam(e.target.checked)} className="size-4" />
               <span className="text-sm">
@@ -300,8 +294,9 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
               disabled={!clientTag.trim()}
               disabledReason="Nejdřív vyplň Klient slug výše"
             />
-          </div>
+          </EditorSection>
 
+          <EditorSection title="Narozeniny" tint="pink">
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
               Narozeniny (den / měsíc — rok není potřeba)
@@ -363,6 +358,9 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
             )}
           </div>
 
+          </EditorSection>
+
+          <EditorSection title="Kontaktní údaje" tint="lavender">
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Telefony</label>
@@ -444,6 +442,7 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
               className="w-full px-3 py-2 rounded-md bg-background/40 border border-border/60 focus:border-primary focus:outline-none text-sm resize-none"
             />
           </div>
+          </EditorSection>
         </div>
 
         {error && (
@@ -461,6 +460,23 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
   );
 }
 
+
+/** Pojmenovaná sekce editoru — barevný rámeček s nadpisem (přehlednost,
+ *  Gideon 2026-08-07). Tint jen jako jemná identita sekce. */
+function EditorSection({ title, tint, children }: { title: string; tint: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="rounded-lg p-3 space-y-2.5"
+      style={{
+        background: `color-mix(in oklch, var(--tint-${tint}) 5%, transparent)`,
+        border: `1px solid color-mix(in oklch, var(--tint-${tint}) 20%, transparent)`,
+      }}
+    >
+      <div className="text-[10px] uppercase tracking-widest font-mono text-muted-foreground">{title}</div>
+      {children}
+    </div>
+  );
+}
 
 // =============================================================================
 // VIP link sekce — privátní URL na /call-log s tokenem
