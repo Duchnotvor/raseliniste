@@ -139,7 +139,14 @@ export default function PageLinksSettings() {
 
       {/* Tlačítko + form pro nový */}
       {!creating ? (
-        <Button onClick={() => setCreating(true)}><Plus /> Nový odkaz</Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button onClick={() => { setCreating(true); setNewSection(""); }}><Plus /> Nový odkaz</Button>
+          {/* Gideon 2026-08-07 („v linkách furt nevidím ty meet"): sekce MEET
+              byla schovaná až ve formuláři — viditelné tlačítko s předvolbou */}
+          <Button variant="outline" onClick={() => { setCreating(true); setNewSection("MEET"); setNewTint("sky"); }}>
+            <Plus /> Meet dlaždice (na /start)
+          </Button>
+        </div>
       ) : (
         <div className="glass rounded-xl p-4 space-y-3">
           <div className="text-xs uppercase tracking-wider text-muted-foreground font-mono">
@@ -147,11 +154,11 @@ export default function PageLinksSettings() {
           </div>
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Název</label>
-            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="např. ARES" className="mt-1" />
+            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newSection === "MEET" ? "Jméno — např. Karel (Avecomp)" : "např. ARES"} className="mt-1" />
           </div>
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">URL</label>
-            <Input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://…" className="mt-1" />
+            <Input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder={newSection === "MEET" ? "https://meet.google.com/xxx-xxxx-xxx" : "https://…"} className="mt-1" />
           </div>
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono block mb-2">Barva</label>
