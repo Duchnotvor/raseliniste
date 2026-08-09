@@ -5,6 +5,9 @@ import SidebarToggle from "@/components/SidebarToggle";
 import ThemeToggle from "@/components/ThemeToggle";
 import GideonWordmark from "@/components/GideonWordmark";
 import SwUpdateBanner from "@/components/SwUpdateBanner";
+// DOČASNÉ (Gideon 2026-08-08): komentování UI přímo v prohlížeči.
+// Až se doladí → smazat import + mount + src/components/Anotace.tsx.
+import Anotace from "@/components/Anotace";
 import { Icon } from "astro-icon/components";
 import { readSession } from "@/lib/session";
 import { getPostaBadgeCount } from "@/lib/posta-badge";
@@ -282,6 +285,7 @@ const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWit
     </div>
   </div>
   <SwUpdateBanner client:load />
+  <Anotace client:load />
 
   {/* iOS PWA externí odkazy: zachytávač je od 2026-08-06 v Base.astro
       (platí i pro /start a veřejné stránky). */}
