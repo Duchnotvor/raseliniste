@@ -70,6 +70,12 @@ export const CRON_JOBS: CronJobDef[] = [
     description: "Google Meet nahrávky → přepis + zápis do Studánka inboxu",
   },
   {
+    name: "plaud-sync",
+    endpoint: "/api/cron/plaud-sync",
+    schedule: { type: "every", minutes: 30 },
+    description: "Plaud nahrávky → přepis + souhrn do Studánka inboxu (REST API, bez Gemini)",
+  },
+  {
     name: "push-notifications",
     endpoint: "/api/cron/push-notifications",
     schedule: { type: "every", minutes: 5 },

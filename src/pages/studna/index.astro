@@ -2,6 +2,7 @@
 import Shell from "../../layouts/Shell.astro";
 import StudnaList from "../../components/StudnaList";
 import MeetInbox from "../../components/MeetInbox";
+import PlaudInbox from "../../components/PlaudInbox";
 import { prisma } from "../../lib/db";
 import { readSession } from "../../lib/session";
 
@@ -23,6 +24,7 @@ if (!user) return Astro.redirect("/login");
 >
   <div class="space-y-4">
     <MeetInbox client:load />
+    <PlaudInbox client:load />
     <StudnaList client:load mode="studanka" />
   </div>
 </Shell>

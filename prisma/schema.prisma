@@ -85,6 +85,7 @@ model User {
   postaDeletionLogs  PostaDeletionLog[]
   meetNotes        MeetNote[]
   meetSpaces       MeetSpace[]
+  plaudNotes       PlaudNote[]
   // EncryptionKey nemá user FK — klíče jsou global (jeden klíč šifruje
   // všechny usery v single-user instance + key versioning pro rotace).
 
@@ -900,6 +901,7 @@ model ProjectBox {
 
   meetNotes         MeetNote[]
   meetSpacesBound   MeetSpace[]
+  plaudNotes        PlaudNote[]
 
   // Prskavka modul = osobní projekty (knížky, nápady, soukromé tvoření).
   // false = klasická Studánka (sdílená s klienty), true = Prskavka (jen Petr).
@@ -1039,6 +1041,35 @@ model MeetSpace {
 
   @@unique([userId, meetingCode])
   @@index([userId, spaceName])
+}
+
+// Plaud nahrávky → Studánka inbox (Gideon 2026-08-09). Přepis i souhrn
+// dodává Plaud (žádné Gemini), sync tahá REST API pod jejich CLI.
+model PlaudNote {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  plaudFileId     String   @unique  // id nahrávky v Plaud — idempotence
+  title           String?
+  recordedAt      DateTime
+  durationSec     Int?
+
+  status          String   @default("done") // done | error
+  processingError String?
+  transcript      String?  @db.Text
+  summaryMd       String?  @db.Text
+
+  projectId       String?
+  project         ProjectBox? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  recordingId     String?  @unique
+
+  deleted         Boolean  @default(false) // tombstone
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, status, recordedAt])
 }
 
 model GuestUser {
