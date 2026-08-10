@@ -1,5 +1,8 @@
 import { prisma } from "./db";
 import { encryptSecret, decryptSecret } from "./crypto";
+import { transcribeAudioOnly } from "./audio-transcribe";
+import { getGemini, DEFAULT_MODEL } from "./gemini";
+import { callTracked } from "./gemini-usage";
 
 /**
  * Plaud nahrávky → Studánka inbox (Gideon 2026-08-09).
@@ -17,7 +20,12 @@ import { encryptSecret, decryptSecret } from "./crypto";
  * ({access_token, refresh_token, expires_at}) se drží ŠIFROVANĚ
  * v UserIntegration(provider="plaud").tokenEnc; refresh řešíme sami.
  *
- * Přepis i souhrn dodává Plaud — žádné Gemini, žádné náklady na tokeny.
+ * Přepis: pokud ho Plaud cloud má (zpracováno v Plaud appce), vezme se
+ * zdarma odtud. Jinak — Gideon 2026-08-10: „stahuj audio, na přepis ser
+ * a udělej ho na naší straně" — se stáhne surové MP3 (detail API dává
+ * presigned_url na S3) a přepíše se naším Gemini (transcribeAudioOnly,
+ * >14 MB jde přes Files API; limit 2 GB / 9,5 h stačí i na 5h nahrávky,
+ * ffmpeg netřeba — MP3 jde do Gemini přímo). Souhrn dělá Gemini flash.
  */
 
 const API_BASE = "https://platform.plaud.ai/developer/api";
@@ -133,21 +141,96 @@ function segmentsToText(raw: string): string {
   }
 }
 
-export interface PlaudSyncStats { listed: number; created: number; waiting: number; errors: number }
+export interface PlaudSyncStats { listed: number; created: number; transcribing: number; errors: number }
+
+// Fire-and-forget guard (viz meet-sync.ts / process-recording.ts — GC pattern)
+interface InFlight { noteId: string; startedAt: number; promise: Promise<void> }
+const inFlight = new Set<InFlight>();
+const isInFlight = (noteId: string) => Array.from(inFlight).some((f) => f.noteId === noteId);
+
+/** Stáhne MP3 z presigned_url a přepíše naším Gemini (transcript + souhrn). */
+async function processPlaudAudio(userId: string, noteId: string, fileId: string): Promise<void> {
+  // Presigned URL expiruje — vždy čerstvý detail
+  const detail = await apiGet(userId, `/open/third-party/files/${encodeURIComponent(fileId)}`);
+  const url = detail.presigned_url as string | undefined;
+  if (!url) throw new Error("Plaud detail nemá presigned_url na audio.");
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Stažení audia selhalo (HTTP ${res.status}).`);
+  const audio = Buffer.from(await res.arrayBuffer());
+  if (audio.byteLength < 5_000) throw new Error(`Audio je podezřele malé (${audio.byteLength} B).`);
+  console.log(`[plaud-sync] ${noteId}: staženo ${(audio.byteLength / 1024 / 1024).toFixed(1)} MB, přepisuju…`);
+
+  const { transcript } = await transcribeAudioOnly({ audio, mimeType: "audio/mpeg" });
+  const summaryMd = await buildPlaudSummary(transcript);
+
+  await prisma.plaudNote.update({
+    where: { id: noteId },
+    data: { status: "done", processingError: null, transcript, summaryMd },
+  });
+  console.log(`[plaud-sync] ${noteId} hotovo (${transcript.length} znaků přepisu)`);
+}
+
+/** Krátký souhrn diktátu (Gemini flash) — pro inbox; plná analýza běží až při přiřazení k projektu. */
+async function buildPlaudSummary(transcript: string): Promise<string> {
+  const prompt = `Jsi asistent, který dělá české souhrny hlasových záznamů z diktafonu (diktáty, schůzky, poznámky za jízdy). Z následujícího přepisu udělej stručný souhrn v markdownu:
+
+## Shrnutí
+(3–8 vět, věcně — o čem záznam je)
+
+## Úkoly a závazky
+(odrážky "- [kdo] co, do kdy pokud zaznělo"; pokud žádné, "—")
+
+## Důležité body
+(odrážky; pokud žádné, "—")
+
+Piš česky, stručně, bez vaty. Nic si nevymýšlej — jen co je v přepisu.
+
+PŘEPIS:
+${transcript.slice(0, 180_000)}`;
+
+  const ai = getGemini();
+  const response = await callTracked({
+    module: "plaud-souhrn",
+    modelName: DEFAULT_MODEL,
+    fn: () => ai.models.generateContent({
+      model: DEFAULT_MODEL,
+      contents: prompt,
+      config: { temperature: 0.2, maxOutputTokens: 8000 },
+    }),
+  });
+  const text = response.text?.trim();
+  if (!text) throw new Error("Gemini nevrátil souhrn.");
+  return text;
+}
+
+/** Zařadí notu do fire-and-forget transkripce (s guardem proti dvojímu běhu). */
+function fireTranscription(userId: string, noteId: string, fileId: string): void {
+  if (isInFlight(noteId)) return;
+  const entry: InFlight = { noteId, startedAt: Date.now(), promise: Promise.resolve() };
+  entry.promise = processPlaudAudio(userId, noteId, fileId)
+    .catch((e) => {
+      console.error(`[plaud-sync] přepis ${noteId} selhal:`, e instanceof Error ? e.message : e);
+      return prisma.plaudNote.update({
+        where: { id: noteId },
+        data: { status: "error", processingError: e instanceof Error ? e.message.slice(0, 500) : String(e) },
+      }).then(() => undefined).catch(() => undefined);
+    })
+    .finally(() => { inFlight.delete(entry); });
+  inFlight.add(entry);
+}
 
 const SYNC_WINDOW_DAYS = 21;
 
 /**
  * Stáhne nové Plaud nahrávky (okno 21 dní) → PlaudNote.
  *
- * DŮLEŽITÉ (zjištěno 2026-08-10 nad reálným API): Plaud cloud přepis NEDĚLÁ
- * sám — source_list/note_list jsou prázdné, dokud Gideon nahrávku nezpracuje
- * v Plaud aplikaci (tlačítko přepisu). Nahrávka bez přepisu se proto založí
- * se status "waiting" (viditelná v inboxu s vysvětlením) a každý další sync
- * ji zkontroluje znovu; jakmile přepis v Plaudu vznikne, doplní se → "done".
+ * Plaud cloud přepis NEDĚLÁ sám (source_list prázdný, dokud se nahrávka
+ * nezpracuje v Plaud appce). Pokud Plaud přepis má, vezme se zdarma; jinak
+ * se MP3 stáhne a přepíše u nás (fire-and-forget, status "processing").
  */
 export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
-  const stats: PlaudSyncStats = { listed: 0, created: 0, waiting: 0, errors: 0 };
+  const stats: PlaudSyncStats = { listed: 0, created: 0, transcribing: 0, errors: 0 };
   const since = Date.now() - SYNC_WINDOW_DAYS * 86400000;
 
   interface FileRow { id: string; name?: string; created_at?: string; duration?: number }
@@ -172,8 +255,9 @@ export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
       where: { plaudFileId: f.id },
       select: { id: true, status: true, deleted: true },
     });
-    // Hotové a zahozené neřešit; "waiting" se kontroluje znovu (přepis mohl přibýt)
     if (existing && (existing.deleted || existing.status === "done")) continue;
+    // Právě se přepisuje u nás — nesahat (guard proti dvojímu stažení)
+    if (existing && isInFlight(existing.id)) { stats.transcribing++; continue; }
 
     try {
       const detail = await apiGet(userId, `/open/third-party/files/${encodeURIComponent(f.id)}`);
@@ -187,28 +271,38 @@ export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
       const summary = notes.find((n) => n.data_type === "auto_sum_note")?.data_content ?? null;
 
       const hasContent = Boolean(transcript || summary);
-      const base = {
+      const meta = {
         title: f.name?.trim() || null,
         recordedAt: createdAt,
         // Plaud posílá duration v MILISEKUNDÁCH (ověřeno 2026-08-10 nad reálným API)
         durationSec: typeof f.duration === "number" ? Math.round(f.duration / 1000) : null,
-        status: hasContent ? "done" : "waiting",
-        transcript,
-        summaryMd: summary,
       };
 
-      if (existing) {
-        if (hasContent) {
-          await prisma.plaudNote.update({ where: { id: existing.id }, data: base });
-          stats.created++;
-        } else {
-          stats.waiting++;
-        }
-      } else {
-        await prisma.plaudNote.create({ data: { userId, plaudFileId: f.id, ...base } });
-        if (hasContent) stats.created++;
-        else stats.waiting++;
+      if (hasContent) {
+        // Přepis z Plaud cloudu existuje (zpracováno v appce) — zdarma, má přednost
+        const data = { ...meta, status: "done", transcript, summaryMd: summary, processingError: null };
+        if (existing) await prisma.plaudNote.update({ where: { id: existing.id }, data });
+        else await prisma.plaudNote.create({ data: { userId, plaudFileId: f.id, ...data } });
+        stats.created++;
+        continue;
       }
+
+      // Bez přepisu v Plaudu → MP3 stáhneme a přepíšeme u nás (Gemini).
+      // Po chybě neopakovat automaticky každý sync (cost guard) — chyba je
+      // vidět v inboxu, zahození + nový sync ji nevzkřísí (tombstone).
+      if (existing?.status === "error") continue;
+
+      let noteId = existing?.id;
+      if (noteId) {
+        await prisma.plaudNote.update({ where: { id: noteId }, data: { ...meta, status: "processing" } });
+      } else {
+        const created = await prisma.plaudNote.create({
+          data: { userId, plaudFileId: f.id, ...meta, status: "processing" },
+        });
+        noteId = created.id;
+      }
+      fireTranscription(userId, noteId, f.id);
+      stats.transcribing++;
     } catch (e) {
       stats.errors++;
       console.warn(`[plaud-sync] file ${f.id}:`, e instanceof Error ? e.message : e);
@@ -220,7 +314,7 @@ export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
     data: { lastUsedAt: new Date(), ...(stats.errors === 0 ? { lastError: null } : {}) },
   }).catch(() => null);
 
-  console.log(`[plaud-sync] userId=${userId} listed=${stats.listed} created=${stats.created} waiting=${stats.waiting} errors=${stats.errors}`);
+  console.log(`[plaud-sync] userId=${userId} listed=${stats.listed} created=${stats.created} transcribing=${stats.transcribing} errors=${stats.errors}`);
   return stats;
 }
 

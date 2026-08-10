@@ -36,7 +36,7 @@ export default function PlaudIntegration() {
       });
       const d = await res.json();
       if (!res.ok || d.error) { setError(d.error ?? `HTTP ${res.status}`); return; }
-      setMessage(`Připojeno. První sync: ${d.stats?.listed ?? 0} nahrávek nalezeno, ${d.stats?.created ?? 0} zápisů staženo${d.stats?.waiting ? `, ${d.stats.waiting} čeká na přepis v Plaud appce` : ""} — koukni do Studánky.`);
+      setMessage(`Připojeno. První sync: ${d.stats?.listed ?? 0} nahrávek nalezeno, ${d.stats?.created ?? 0} zápisů staženo${d.stats?.transcribing ? `, ${d.stats.transcribing} se přepisuje u nás` : ""} — koukni do Studánky.`);
       setTokens("");
       await load();
     } catch { setError("Síťová chyba."); }
