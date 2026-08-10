@@ -36,6 +36,8 @@ export default function MeetInbox() {
   const [hasScope, setHasScope] = useState(true);
   const [projects, setProjects] = useState<ProjectOpt[]>([]);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // Gideon 2026-08-10: default jen poslední 3, zbytek na rozkliknutí
+  const [showAll, setShowAll] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -253,7 +255,7 @@ export default function MeetInbox() {
         <div className="text-sm text-muted-foreground italic">Žádné zápisy — až proběhne nahraná Meet schůzka, objeví se tady.</div>
       ) : (
         <div className="space-y-2">
-          {notes.map((n) => {
+          {(showAll ? notes : notes.slice(0, 3)).map((n) => {
             const isOpen = open.has(n.id);
             return (
               <div key={n.id} className="rounded-lg border border-border bg-card/50">
@@ -306,6 +308,16 @@ export default function MeetInbox() {
               </div>
             );
           })}
+          {notes.length > 3 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {showAll ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+              {showAll ? "Zobrazit jen poslední 3" : `Zobrazit starší (${notes.length - 3})`}
+            </button>
+          )}
         </div>
       )}
     </div>
