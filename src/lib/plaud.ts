@@ -133,13 +133,21 @@ function segmentsToText(raw: string): string {
   }
 }
 
-export interface PlaudSyncStats { listed: number; created: number; errors: number }
+export interface PlaudSyncStats { listed: number; created: number; waiting: number; errors: number }
 
 const SYNC_WINDOW_DAYS = 21;
 
-/** Stáhne nové Plaud nahrávky (okno 21 dní) → PlaudNote (done, s přepisem i souhrnem). */
+/**
+ * Stáhne nové Plaud nahrávky (okno 21 dní) → PlaudNote.
+ *
+ * DŮLEŽITÉ (zjištěno 2026-08-10 nad reálným API): Plaud cloud přepis NEDĚLÁ
+ * sám — source_list/note_list jsou prázdné, dokud Gideon nahrávku nezpracuje
+ * v Plaud aplikaci (tlačítko přepisu). Nahrávka bez přepisu se proto založí
+ * se status "waiting" (viditelná v inboxu s vysvětlením) a každý další sync
+ * ji zkontroluje znovu; jakmile přepis v Plaudu vznikne, doplní se → "done".
+ */
 export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
-  const stats: PlaudSyncStats = { listed: 0, created: 0, errors: 0 };
+  const stats: PlaudSyncStats = { listed: 0, created: 0, waiting: 0, errors: 0 };
   const since = Date.now() - SYNC_WINDOW_DAYS * 86400000;
 
   interface FileRow { id: string; name?: string; created_at?: string; duration?: number }
@@ -160,8 +168,12 @@ export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
     const createdAt = f.created_at ? new Date(f.created_at) : new Date();
     if (createdAt.getTime() < since) continue;
 
-    const existing = await prisma.plaudNote.findUnique({ where: { plaudFileId: f.id }, select: { id: true } });
-    if (existing) continue; // idempotence (deleted řeší unique — tombstone řádek zůstává)
+    const existing = await prisma.plaudNote.findUnique({
+      where: { plaudFileId: f.id },
+      select: { id: true, status: true, deleted: true },
+    });
+    // Hotové a zahozené neřešit; "waiting" se kontroluje znovu (přepis mohl přibýt)
+    if (existing && (existing.deleted || existing.status === "done")) continue;
 
     try {
       const detail = await apiGet(userId, `/open/third-party/files/${encodeURIComponent(f.id)}`);
@@ -174,21 +186,29 @@ export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
       const transcript = rawContent ? segmentsToText(rawContent) : null;
       const summary = notes.find((n) => n.data_type === "auto_sum_note")?.data_content ?? null;
 
-      if (!transcript && !summary) continue; // ještě nezpracováno v Plaud cloudu — vezme příští běh
+      const hasContent = Boolean(transcript || summary);
+      const base = {
+        title: f.name?.trim() || null,
+        recordedAt: createdAt,
+        // Plaud posílá duration v MILISEKUNDÁCH (ověřeno 2026-08-10 nad reálným API)
+        durationSec: typeof f.duration === "number" ? Math.round(f.duration / 1000) : null,
+        status: hasContent ? "done" : "waiting",
+        transcript,
+        summaryMd: summary,
+      };
 
-      await prisma.plaudNote.create({
-        data: {
-          userId,
-          plaudFileId: f.id,
-          title: f.name?.trim() || null,
-          recordedAt: createdAt,
-          durationSec: typeof f.duration === "number" ? Math.round(f.duration) : null,
-          status: "done",
-          transcript,
-          summaryMd: summary,
-        },
-      });
-      stats.created++;
+      if (existing) {
+        if (hasContent) {
+          await prisma.plaudNote.update({ where: { id: existing.id }, data: base });
+          stats.created++;
+        } else {
+          stats.waiting++;
+        }
+      } else {
+        await prisma.plaudNote.create({ data: { userId, plaudFileId: f.id, ...base } });
+        if (hasContent) stats.created++;
+        else stats.waiting++;
+      }
     } catch (e) {
       stats.errors++;
       console.warn(`[plaud-sync] file ${f.id}:`, e instanceof Error ? e.message : e);
@@ -200,7 +220,7 @@ export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
     data: { lastUsedAt: new Date(), ...(stats.errors === 0 ? { lastError: null } : {}) },
   }).catch(() => null);
 
-  console.log(`[plaud-sync] userId=${userId} listed=${stats.listed} created=${stats.created} errors=${stats.errors}`);
+  console.log(`[plaud-sync] userId=${userId} listed=${stats.listed} created=${stats.created} waiting=${stats.waiting} errors=${stats.errors}`);
   return stats;
 }
 

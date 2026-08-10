@@ -70,7 +70,7 @@ export default function PlaudInbox() {
       const res = await fetch("/api/studna/plaud", { method: "POST" });
       const d = await res.json();
       if (!res.ok) { setError(d.error ?? "Sync selhal."); return; }
-      setMessage(`Nalezeno ${d.stats?.listed ?? 0} nahrávek · ${d.stats?.created ?? 0} nových zápisů`);
+      setMessage(`Nalezeno ${d.stats?.listed ?? 0} nahrávek · ${d.stats?.created ?? 0} nových zápisů${d.stats?.waiting ? ` · ${d.stats.waiting} čeká na přepis v Plaud appce` : ""}`);
       setTimeout(() => setMessage(null), 8000);
       await load();
     } catch { setError("Síťová chyba."); }
@@ -163,6 +163,7 @@ export default function PlaudInbox() {
                     <span className="font-mono text-xs text-muted-foreground tabular shrink-0">{fmtWhen(n)}</span>
                     <span className="truncate font-medium">{n.title ?? "Nahrávka bez názvu"}</span>
                   </button>
+                  {n.status === "waiting" && <span className="text-[11px] font-mono text-muted-foreground" title="Plaud sám nepřepisuje — otevři nahrávku v Plaud aplikaci a spusť přepis; sem se pak stáhne sám.">čeká na přepis v Plaud appce…</span>}
                   {n.status === "error" && <span className="text-[11px] font-mono text-[color:var(--c-signal)]" title={n.processingError ?? ""}>chyba</span>}
                   {n.recordingId && n.project ? (
                     <span className="inline-flex items-center gap-1 text-[11px] font-mono text-[var(--tint-sage)]">
@@ -189,6 +190,11 @@ export default function PlaudInbox() {
                     )}
                     {n.summaryMd ? (
                       <pre className="text-xs whitespace-pre-wrap font-sans leading-relaxed rounded-md bg-black/10 p-3 max-h-96 overflow-y-auto">{n.summaryMd}</pre>
+                    ) : n.status === "waiting" ? (
+                      <div className="text-xs text-muted-foreground">
+                        Plaud sám od sebe nepřepisuje — otevři nahrávku v Plaud aplikaci a spusť přepis
+                        (AI transcription). Další sync (à 30 min, nebo „Zkontrolovat teď") si přepis stáhne sám.
+                      </div>
                     ) : (
                       <div className="text-xs text-muted-foreground italic">Souhrn zatím není.</div>
                     )}
