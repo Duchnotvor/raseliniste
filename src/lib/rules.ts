@@ -38,6 +38,14 @@ export interface EvaluateInput {
   // (RESERVED invite se jinak zablokoval sám o sebe)
   excludeBookingInviteId?: string;
   bookingMode?: "CLIENT" | "FRIEND" | null;  // jen pro booking-only pravidla
+  // Gideon 2026-08-10: per-invite výjimka — SO/NE se nepovažuje za zakázaný
+  // den (day-restriction + availability pravidla víkend pustí, hodiny dle typu)
+  allowWeekend?: boolean;
+}
+
+/** SO (6) / NE (0) povolené jen s per-invite výjimkou allowWeekend. */
+function isWeekendDow(dow: number): boolean {
+  return dow === 0 || dow === 6;
 }
 
 export interface EvaluationResult {
@@ -246,7 +254,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
   // HARD_DAY_RESTRICTION_PRAGUE
   if (input.type === "MEETING_PRAGUE") {
     const dow = dowOf(input.startsAt);
-    if (!cfg.pragueDays.includes(dow)) {
+    if (!cfg.pragueDays.includes(dow) && !(input.allowWeekend && isWeekendDow(dow))) {
       signals.push({
         rule: "HARD_DAY_RESTRICTION_PRAGUE",
         severity: "ERROR",
@@ -258,7 +266,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
   // HARD_DAY_RESTRICTION_HOME
   if (input.type === "MEETING_HOME") {
     const dow = dowOf(input.startsAt);
-    if (!cfg.homeDays.includes(dow)) {
+    if (!cfg.homeDays.includes(dow) && !(input.allowWeekend && isWeekendDow(dow))) {
       signals.push({
         rule: "HARD_DAY_RESTRICTION_HOME",
         severity: "ERROR",
@@ -270,7 +278,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
   // HARD_DAY_RESTRICTION_LUNCH (Petr 2026-06-19)
   if (input.type === "MEETING_LUNCH_PRAGUE") {
     const dow = dowOf(input.startsAt);
-    if (!cfg.lunchBookingDays.includes(dow)) {
+    if (!cfg.lunchBookingDays.includes(dow) && !(input.allowWeekend && isWeekendDow(dow))) {
       signals.push({
         rule: "HARD_DAY_RESTRICTION_LUNCH",
         severity: "ERROR",
@@ -453,7 +461,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     }
 
     // OUTSIDE_AVAILABILITY: zkontroluj že je v okně dle typu
-    if (!isWithinAvailability(input.type, input.startsAt, input.endsAt, cfg)) {
+    if (!isWithinAvailability(input.type, input.startsAt, input.endsAt, cfg, input.allowWeekend)) {
       signals.push({
         rule: "OUTSIDE_AVAILABILITY",
         severity: "ERROR",
@@ -495,6 +503,8 @@ export interface AvailabilityOpts {
    * MAX(now + leadTime, earliestSlotStart) — přísnější z obou vyhrává.
    */
   earliestSlotStart?: Date;
+  /** Gideon 2026-08-10: výjimečné povolení SO/NE slotů (hodiny dle typu). */
+  allowWeekend?: boolean;
 }
 
 export interface Slot {
@@ -525,7 +535,8 @@ export async function listAvailableSlots(opts: AvailabilityOpts): Promise<Slot[]
     for (const type of opts.meetingTypes) {
       const dayConfig = availabilityForType(type, cfg);
       if (!dayConfig) continue;
-      if (!dayConfig.days.includes(dowOf(day))) continue;
+      const dow = dowOf(day);
+      if (!dayConfig.days.includes(dow) && !(opts.allowWeekend && isWeekendDow(dow))) continue;
 
       // Generuj hodinové sloty v rámci okna
       const winStart = timeOnDate(day, dayConfig.start);
@@ -540,6 +551,7 @@ export async function listAvailableSlots(opts: AvailabilityOpts): Promise<Slot[]
           startsAt: s,
           endsAt: e,
           bookingMode: opts.bookingMode,
+          allowWeekend: opts.allowWeekend,
         });
 
         // Pro booking nabídneme jen GREEN.
@@ -623,10 +635,12 @@ function isWithinAvailability(
   startsAt: Date,
   endsAt: Date,
   cfg: SchedulingConfig,
+  allowWeekend?: boolean,
 ): boolean {
   const a = availabilityForType(t, cfg);
   if (!a) return true; // pro typy bez definice (PERSONAL, OTHER, …) neblokujeme
-  if (!a.days.includes(dowOf(startsAt))) return false;
+  const dow = dowOf(startsAt);
+  if (!a.days.includes(dow) && !(allowWeekend && isWeekendDow(dow))) return false;
   const startMin = minutesOfDay(startsAt);
   const endMin = minutesOfDay(endsAt);
   return startMin >= hhmmToMin(a.start) && endMin <= hhmmToMin(a.end);

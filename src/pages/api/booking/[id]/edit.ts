@@ -17,6 +17,8 @@ const Body = z.object({
   slotDurationMin: z.number().int().min(15).max(240).optional(),
   // YYYY-MM-DD; "" / null = zrušit omezení
   availableFrom: z.string().nullable().optional(),
+  // Gideon 2026-08-10: výjimečné povolení víkendových slotů
+  allowWeekend: z.boolean().optional(),
   // YYYY-MM-DD — konec platnosti (uloží se konec dne)
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   publicNote: z.string().max(1000).nullable().optional(),
@@ -58,6 +60,7 @@ export const PATCH: APIRoute = async ({ params, request, cookies }) => {
     }
   }
   if (b.validUntil) data.validUntil = new Date(`${b.validUntil}T23:59:59`);
+  if (b.allowWeekend !== undefined) data.allowWeekend = b.allowWeekend;
   if (b.publicNote !== undefined) data.publicNote = b.publicNote?.trim() || null;
   if (b.internalNote !== undefined) data.internalNote = b.internalNote?.trim() || null;
 

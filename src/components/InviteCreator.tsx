@@ -22,6 +22,7 @@ interface InviteRow {
   status: string;
   validUntil: string;
   availableFrom: string | null;
+  allowWeekend: boolean;
   publicNote: string | null;
   internalNote: string | null;
   inviteeName: string | null;
@@ -37,6 +38,7 @@ interface EditForm {
   meetingType: string;
   slotDurationMin: string;
   availableFrom: string; // YYYY-MM-DD | ""
+  allowWeekend: boolean;
   validUntil: string;    // YYYY-MM-DD
   publicNote: string;
   internalNote: string;
@@ -70,6 +72,8 @@ export default function InviteCreator() {
   // Petr 2026-05-25: per-invite "sloty dostupné od" — YYYY-MM-DD string.
   // Prázdné = jen globální lead time (72h klient / 24h přítel).
   const [availableFrom, setAvailableFrom] = useState("");
+  // Gideon 2026-08-10: výjimečné povolení víkendu pro tuhle pozvánku
+  const [allowWeekend, setAllowWeekend] = useState(false);
   // Petr 2026-05-25: veřejná poznámka pro hosta. Zobrazí se v pickeru,
   // v Google eventu (description) a v .ics mailové příloze.
   const [publicNote, setPublicNote] = useState("");
@@ -94,6 +98,7 @@ export default function InviteCreator() {
       meetingType: inv.meetingType,
       slotDurationMin: String(inv.slotDurationMin),
       availableFrom: inv.availableFrom ? inv.availableFrom.slice(0, 10) : "",
+      allowWeekend: inv.allowWeekend ?? false,
       validUntil: inv.validUntil ? inv.validUntil.slice(0, 10) : "",
       publicNote: inv.publicNote ?? "",
       internalNote: inv.internalNote ?? "",
@@ -113,6 +118,7 @@ export default function InviteCreator() {
           meetingType: editForm.meetingType,
           slotDurationMin: parseInt(editForm.slotDurationMin),
           availableFrom: editForm.availableFrom || null,
+          allowWeekend: editForm.allowWeekend,
           validUntil: editForm.validUntil || undefined,
           publicNote: editForm.publicNote || null,
           internalNote: editForm.internalNote || null,
@@ -179,6 +185,7 @@ export default function InviteCreator() {
           validityDays: parseInt(validity),
           internalNote: internalNote.trim() || undefined,
           availableFrom: availableFrom.trim() || undefined,
+          allowWeekend: allowWeekend || undefined,
           publicNote: publicNote.trim() || undefined,
           contactEmail: !universal && selectedNeedsEmail && newEmail.trim() ? newEmail.trim() : undefined,
         }),
@@ -443,6 +450,22 @@ export default function InviteCreator() {
           </p>
         </div>
 
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allowWeekend}
+            onChange={(e) => setAllowWeekend(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm">
+            Výjimečně povolit i víkend
+            <span className="block text-xs text-muted-foreground">
+              Host uvidí sloty i v sobotu a neděli (online i prezenční, hodiny dle typu schůzky).
+              Platí jen pro tuhle pozvánku.
+            </span>
+          </span>
+        </label>
+
         <div>
           <label className="text-xs font-mono uppercase text-muted-foreground">
             Poznámka pro hosta (volitelně)
@@ -658,6 +681,14 @@ export default function InviteCreator() {
                           />
                         </div>
                       </div>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editForm.allowWeekend}
+                          onChange={(e) => setEditForm((f) => f && ({ ...f, allowWeekend: e.target.checked }))}
+                        />
+                        Výjimečně povolit i víkend
+                      </label>
                       <div>
                         <label className="text-[10px] font-mono uppercase text-muted-foreground">Veřejná poznámka (host ji uvidí)</label>
                         <textarea

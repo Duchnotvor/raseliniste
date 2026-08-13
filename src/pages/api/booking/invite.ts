@@ -19,6 +19,8 @@ const schema = z.object({
   // Petr 2026-05-25: per-invite earliest slot. Akceptujeme ISO date (YYYY-MM-DD)
   // nebo plný ISO datetime. Prázdný string nebo null = žádné omezení.
   availableFrom: z.string().min(1).optional().nullable(),
+  // Gideon 2026-08-10: výjimečné povolení víkendových slotů pro tuhle pozvánku
+  allowWeekend: z.boolean().optional(),
   // Gideon 2026-08-04 („chci aby to fungovalo"): kontakt bez emailu už
   // neblokuje — email se zadá rovnou v pozvánce a uloží se KE KONTAKTU
   // (+ push do iCloudu), pak se pozvánka normálně vytvoří.

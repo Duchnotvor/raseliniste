@@ -1414,6 +1414,10 @@ model BookingInvite {
   // Použije se MAX(now + leadTime, availableFrom).
   availableFrom   DateTime?
 
+  // Gideon 2026-08-10: výjimečné povolení víkendu pro tuhle pozvánku —
+  // sloty (online i prezenční) se nabízejí i v SO/NE, v hodinách dle typu.
+  allowWeekend    Boolean             @default(false)
+
   events          CalendarEvent[]
 
   createdAt       DateTime            @default(now())

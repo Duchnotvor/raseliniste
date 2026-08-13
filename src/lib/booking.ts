@@ -43,6 +43,8 @@ export interface CreateInviteInput {
    * se MAX(now + leadTime, availableFrom).
    */
   availableFrom?: Date | null;
+  /** Gideon 2026-08-10: výjimečně nabídnout i SO/NE sloty (online i prezenční). */
+  allowWeekend?: boolean;
   /**
    * Petr 2026-05-25: veřejná poznámka — host ji uvidí v rezervačním pickeru,
    * v Google kalendářovém eventu (description) a v .ics popisu události.
@@ -104,6 +106,7 @@ export async function createInvite(input: CreateInviteInput): Promise<{
       inviteeEmail: contactSnapshot.email,
       inviteePhone: contactSnapshot.phone,
       availableFrom: input.availableFrom ?? null,
+      allowWeekend: input.allowWeekend ?? false,
     },
     select: { id: true, token: true },
   });
@@ -137,6 +140,7 @@ export async function getSlotsForInvite(inviteId: string): Promise<{
     bookingMode: invite.mode as BookingModeStr,
     slotDurationMinutes: invite.slotDurationMin,
     earliestSlotStart: invite.availableFrom ?? undefined,
+    allowWeekend: invite.allowWeekend,
   });
 
   return { invite, slots };
@@ -197,6 +201,7 @@ export async function reserveSlot(input: ReserveInput): Promise<{
     // AUDIT 2026-07-31: retry po selhaném confirmu — vlastní RESERVED slot
     // nesmí blokovat sám sebe
     excludeBookingInviteId: invite.id,
+    allowWeekend: invite.allowWeekend,
   });
   if (evaluation.verdict === "RED") {
     throw new Error(`Slot už není dostupný: ${evaluation.signals[0]?.message ?? "konflikt"}`);
