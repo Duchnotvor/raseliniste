@@ -47,6 +47,15 @@ export async function syncGoogleCalendar(userId: string): Promise<SyncResult> {
   // v Google API není, není v Rašeliništi (s safety guards proti error).
   const seenIds = new Set<string>();
 
+  // Gideon 2026-08-13: rituály propsané do Googlu (CustomRitual.googleEventId)
+  // se NESMÍ syncovat zpátky — v Rašeliništi se kreslí jako virtual events,
+  // jinak by byly vidět dvakrát. Instance recurring eventu nesou recurringEventId.
+  const ritualRows = await prisma.customRitual.findMany({
+    where: { googleEventId: { not: null } },
+    select: { googleEventId: true },
+  });
+  const ritualGoogleIds = new Set(ritualRows.map((r) => r.googleEventId as string));
+
   let pageToken: string | undefined = undefined;
   let pagingComplete = false;
   try {
@@ -63,6 +72,10 @@ export async function syncGoogleCalendar(userId: string): Promise<SyncResult> {
       const items: calendar_v3.Schema$Event[] = res.data.items ?? [];
       for (const ev of items) {
         if (ev.id) seenIds.add(ev.id);
+        // Instance rituálového recurring eventu → přeskočit (viz výše)
+        if ((ev.recurringEventId && ritualGoogleIds.has(ev.recurringEventId)) || (ev.id && ritualGoogleIds.has(ev.id))) {
+          continue;
+        }
         try {
           const result = await upsertEvent(ev, pragueLoc?.id ?? null);
           if (result === "inserted") inserted++;
@@ -381,6 +394,98 @@ export async function createGoogleEvent(
     htmlLink: res.data.htmlLink ?? null,
     meetLink,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Rituály → opakované Google eventy (Gideon 2026-08-13)
+// ---------------------------------------------------------------------------
+
+/** RRULE BYDAY kódy — index odpovídá CustomRitual.daysOfWeek (0=Po … 6=Ne). */
+const RRULE_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
+
+export interface RitualRecurringInput {
+  title: string;
+  description: string | null;
+  daysOfWeek: number[];        // 0=Po … 6=Ne, neprázdné
+  startHour: number;           // Praha TZ
+  startMinute: number;
+  durationMin: number;
+  reminderMinutes: number | null; // null = žádné upozornění
+  googleEventId: string | null;   // existující recurring event → patch
+}
+
+/** Datum (Y/M/D v Praze) nejbližšího dne, jehož den v týdnu (0=Po) je v daysOfWeek. */
+function nextPragueOccurrence(daysOfWeek: number[]): { y: number; m: number; d: number } {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Prague", year: "numeric", month: "2-digit", day: "2-digit" });
+  for (let i = 0; i < 7; i++) {
+    const cand = new Date(Date.now() + i * 86400000);
+    const [y, m, d] = fmt.format(cand).split("-").map(Number);
+    const dowMon0 = (new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay() + 6) % 7;
+    if (daysOfWeek.includes(dowMon0)) return { y, m, d };
+  }
+  const [y, m, d] = fmt.format(new Date()).split("-").map(Number);
+  return { y, m, d }; // nedosažitelné (daysOfWeek neprázdné), fallback dnes
+}
+
+/**
+ * Vytvoří / aktualizuje opakovaný Google event pro rituál (RRULE WEEKLY).
+ * Časy posíláme jako naive local string + timeZone Europe/Prague — Google pak
+ * drží opakování přes DST správně. Vrací eventId (nový při 404/410 na patchi).
+ */
+export async function upsertRitualRecurringEvent(userId: string, r: RitualRecurringInput): Promise<string> {
+  const auth = await getAuthorizedClient(userId);
+  const calendar = google.calendar({ version: "v3", auth });
+
+  const { y, m, d } = nextPragueOccurrence(r.daysOfWeek);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const startLocal = `${y}-${pad(m)}-${pad(d)}T${pad(r.startHour)}:${pad(r.startMinute)}:00`;
+  const endTotal = r.startHour * 60 + r.startMinute + r.durationMin;
+  // durationMin max 480 → konec nikdy nepřeteče přes půlnoc jen u startů po 16:00+8h;
+  // pro jistotu clamp na 23:59 (Google vyžaduje end tentýž den u naive stringu)
+  const endMin = Math.min(endTotal, 23 * 60 + 59);
+  const endLocal = `${y}-${pad(m)}-${pad(d)}T${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`;
+  const byday = [...new Set(r.daysOfWeek)].sort().map((i) => RRULE_DAYS[i]).join(",");
+
+  const requestBody: calendar_v3.Schema$Event = {
+    summary: r.title,
+    description: r.description ?? undefined,
+    start: { dateTime: startLocal, timeZone: "Europe/Prague" },
+    end: { dateTime: endLocal, timeZone: "Europe/Prague" },
+    recurrence: [`RRULE:FREQ=WEEKLY;BYDAY=${byday}`],
+    reminders: {
+      useDefault: false,
+      overrides: r.reminderMinutes != null ? [{ method: "popup", minutes: r.reminderMinutes }] : [],
+    },
+  };
+
+  if (r.googleEventId) {
+    try {
+      const res = await calendar.events.patch({ calendarId: "primary", eventId: r.googleEventId, requestBody });
+      await recordUsage(userId);
+      return res.data.id ?? r.googleEventId;
+    } catch (e) {
+      const status = (e as { status?: number; code?: number }).status ?? (e as { code?: number }).code;
+      if (status !== 404 && status !== 410) throw e;
+      // event v Googlu zmizel (ručně smazán) → založ nový
+    }
+  }
+  const res = await calendar.events.insert({ calendarId: "primary", requestBody });
+  await recordUsage(userId);
+  if (!res.data.id) throw new Error("Google nevrátil id eventu.");
+  return res.data.id;
+}
+
+/** Smaže recurring event rituálu; 404/410 (už neexistuje) ignoruje. */
+export async function deleteRitualRecurringEvent(userId: string, googleEventId: string): Promise<void> {
+  const auth = await getAuthorizedClient(userId);
+  const calendar = google.calendar({ version: "v3", auth });
+  try {
+    await calendar.events.delete({ calendarId: "primary", eventId: googleEventId });
+    await recordUsage(userId);
+  } catch (e) {
+    const status = (e as { status?: number; code?: number }).status ?? (e as { code?: number }).code;
+    if (status !== 404 && status !== 410) throw e;
+  }
 }
 
 export async function deleteGoogleEvent(userId: string, eventId: string): Promise<void> {

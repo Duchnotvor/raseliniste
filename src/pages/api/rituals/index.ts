@@ -13,11 +13,18 @@ const Body = z.object({
   startMinute: z.number().int().min(0).max(59),
   durationMin: z.number().int().min(5).max(480),
   active: z.boolean().optional(),
+  // Gideon 2026-08-13: upozornění + propis do Google kalendáře
+  reminderMinutes: z.number().int().min(0).max(1440).nullable().optional(),
+  syncToGoogle: z.boolean().optional(),
 });
 
 export const GET: APIRoute = async ({ cookies }) => {
   const session = await readSession(cookies);
   if (!session) return Response.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+
+  // Vestavěné rituály (ranní pohled atd.) žijí od 2026-08-13 taky tady
+  const { ensureBuiltinRituals } = await import("@/lib/rituals-server");
+  await ensureBuiltinRituals(session.uid);
 
   const items = await prisma.customRitual.findMany({
     where: { userId: session.uid },
@@ -50,7 +57,13 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       startMinute: body.startMinute,
       durationMin: body.durationMin,
       active: body.active ?? true,
+      reminderMinutes: body.reminderMinutes ?? null,
+      syncToGoogle: body.syncToGoogle ?? false,
     },
   });
-  return Response.json({ ritual: created });
+
+  const { syncRitualToGoogle } = await import("@/lib/rituals-server");
+  const googleError = await syncRitualToGoogle(session.uid, created.id);
+  const ritual = await prisma.customRitual.findUnique({ where: { id: created.id } });
+  return Response.json({ ritual, googleError });
 };

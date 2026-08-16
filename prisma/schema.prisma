@@ -1464,6 +1464,21 @@ model CustomRitual {
   startMinute Int      @default(0)
   durationMin Int                     // 5..480
 
+  // Gideon 2026-08-13: 3 vestavěné rituály jsou od teď taky řádky tady
+  // (seed z ensureBuiltinRituals) — editovatelné časy/dny/obsah. Nemažou se,
+  // jen deaktivují. Hodnoty: "morning_day" | "friday_reflection" | "weekly_review".
+  builtinType String?  @unique
+
+  // Gideon 2026-08-13: upozornění X min před začátkem (Google popup reminder).
+  // Null = bez upozornění.
+  reminderMinutes Int?
+
+  // Gideon 2026-08-13: propis do Google kalendáře (perina@mediaface.cz) jako
+  // opakovaná událost (RRULE). googleEventId = id recurring eventu; jeho
+  // instance sync-calendars PŘESKAKUJE (jinak by byly v kalendáři dvakrát).
+  syncToGoogle  Boolean @default(false)
+  googleEventId String?
+
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

@@ -4,7 +4,8 @@ import Base from "../../layouts/Base.astro";
 import DayView from "../../components/DayView";
 import { prisma } from "../../lib/db";
 import { readSession } from "../../lib/session";
-import { generateWeekRituals, generateCustomRituals, getMondayOfWeek } from "../../lib/week-rituals";
+import { generateCustomRituals, getMondayOfWeek } from "../../lib/week-rituals";
+import { ensureBuiltinRituals } from "../../lib/rituals-server";
 import { generateAnniversaryEvents } from "../../lib/anniversary-events";
 
 const session = await readSession(Astro.cookies);
@@ -65,16 +66,12 @@ const dedupedEvents = events.filter((e) => {
 // Připoj rituály daného týdne, vyfiltruj jen ty co spadají do dnešního dne.
 // Petr potřebuje vidět rituály i na mobilu, ne jen v týdenním desktop pohledu.
 const weekMonday = getMondayOfWeek(dayStart);
+// Od 2026-08-13 všechny rituály (i vestavěné) z CustomRitual řádků
+await ensureBuiltinRituals(session.uid);
 const customRituals = await prisma.customRitual.findMany({
   where: { userId: session.uid, active: true },
 });
-const allRituals = [
-  ...generateWeekRituals(
-    weekMonday,
-    user.ritualTemplates as Record<string, string> | null,
-  ),
-  ...generateCustomRituals(weekMonday, customRituals),
-];
+const allRituals = generateCustomRituals(weekMonday, customRituals);
 const todaysRituals = allRituals.filter((r) => {
   const start = new Date(r.startsAt);
   return start >= dayStart && start <= dayEnd;

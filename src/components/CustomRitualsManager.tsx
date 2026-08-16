@@ -13,7 +13,22 @@ interface CustomRitual {
   startMinute: number;
   durationMin: number;
   active: boolean;
+  // Gideon 2026-08-13: vestavěné rituály jako řádky + upozornění + Google sync
+  builtinType: string | null;
+  reminderMinutes: number | null;
+  syncToGoogle: boolean;
+  googleEventId: string | null;
 }
+
+const REMINDER_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: "Bez upozornění" },
+  { value: 0, label: "V čase začátku" },
+  { value: 5, label: "5 min předem" },
+  { value: 10, label: "10 min předem" },
+  { value: 15, label: "15 min předem" },
+  { value: 30, label: "30 min předem" },
+  { value: 60, label: "1 h předem" },
+];
 
 const RECURRENCE_PRESETS: { id: string; label: string; days: number[] }[] = [
   { id: "every_day", label: "Každý den", days: [0, 1, 2, 3, 4, 5, 6] },
@@ -67,9 +82,10 @@ export default function CustomRitualsManager() {
     <section className="glass rounded-xl p-4 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="font-serif text-xl">Vlastní rituály</h2>
+          <h2 className="font-serif text-xl">Rituály</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Nad rámec defaultních 3 (ranní / páteční / nedělní). Stejně se vykreslí v kalendáři, peach barva, dashed border.
+            Včetně tří vestavěných (ranní / páteční / nedělní) — u všech jde upravit čas, dny,
+            obsah i upozornění, a propsat je do Google kalendáře.
           </p>
         </div>
         {editingId !== "new" && (
@@ -129,6 +145,9 @@ export default function CustomRitualsManager() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium" style={{ color: r.active ? "color-mix(in oklch, var(--tint-peach) 95%, white)" : undefined }}>
                     {r.title}
+                    {r.builtinType && (
+                      <span className="ml-2 text-[10px] font-mono uppercase text-muted-foreground border border-white/15 rounded px-1.5 py-0.5 align-middle">vestavěný</span>
+                    )}
                   </div>
                   <div className="text-xs font-mono tabular text-muted-foreground mt-0.5">
                     {formatRecurrence(r.daysOfWeek)} ·{" "}
@@ -136,6 +155,8 @@ export default function CustomRitualsManager() {
                     {" "}–{" "}
                     {formatEnd(r.startHour, r.startMinute, r.durationMin)}
                     {" "}({r.durationMin} min)
+                    {r.reminderMinutes != null && ` · 🔔 ${r.reminderMinutes === 0 ? "v čase začátku" : `${r.reminderMinutes} min předem`}`}
+                    {r.syncToGoogle && (r.googleEventId ? " · v Google kalendáři" : " · Google čeká…")}
                   </div>
                 </div>
                 <button
@@ -154,14 +175,16 @@ export default function CustomRitualsManager() {
                 >
                   <Edit3 className="size-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => remove(r.id)}
-                  className="size-8 rounded-md hover:bg-white/5 grid place-items-center text-muted-foreground hover:text-destructive"
-                  title="Smazat"
-                >
-                  <Trash2 className="size-4" />
-                </button>
+                {!r.builtinType && (
+                  <button
+                    type="button"
+                    onClick={() => remove(r.id)}
+                    className="size-8 rounded-md hover:bg-white/5 grid place-items-center text-muted-foreground hover:text-destructive"
+                    title="Smazat"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                )}
               </li>
             )
           )}
@@ -206,6 +229,8 @@ function RitualForm({
   const [startHour, setStartHour] = useState(initial?.startHour ?? 8);
   const [startMinute, setStartMinute] = useState(initial?.startMinute ?? 0);
   const [durationMin, setDurationMin] = useState(initial?.durationMin ?? 15);
+  const [reminderMinutes, setReminderMinutes] = useState<number | null>(initial?.reminderMinutes ?? null);
+  const [syncToGoogle, setSyncToGoogle] = useState(initial?.syncToGoogle ?? false);
   const [saving, setSaving] = useState(false);
 
   const daysToSave: number[] =
@@ -238,6 +263,8 @@ function RitualForm({
         startHour,
         startMinute,
         durationMin,
+        reminderMinutes,
+        syncToGoogle,
       };
       const res = initial
         ? await fetch(`/api/rituals/${initial.id}`, {
@@ -255,6 +282,8 @@ function RitualForm({
         onError(data.error ?? "Uložení selhalo.");
         return;
       }
+      // Uloženo do DB; Google propis mohl selhat samostatně — ukázat, ne zamlčet
+      if (data.googleError) onError(data.googleError);
       onSaved(data.ritual);
     } finally {
       setSaving(false);
@@ -363,6 +392,41 @@ function RitualForm({
             {formatEnd(startHour, startMinute, durationMin)}
           </div>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+            Upozornění
+          </label>
+          <select
+            value={reminderMinutes === null ? "none" : String(reminderMinutes)}
+            onChange={(e) => setReminderMinutes(e.target.value === "none" ? null : parseInt(e.target.value, 10))}
+            className="w-full px-2 py-1.5 rounded-md bg-background/40 border border-border/60 text-sm"
+          >
+            {REMINDER_OPTIONS.map((o) => (
+              <option key={o.label} value={o.value === null ? "none" : String(o.value)}>{o.label}</option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Notifikace přijde z Google/Apple kalendáře — funguje jen s propisem níže.
+          </p>
+        </div>
+        <label className="flex items-start gap-2 cursor-pointer pt-5">
+          <input
+            type="checkbox"
+            checked={syncToGoogle}
+            onChange={(e) => setSyncToGoogle(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm">
+            Propsat do Google kalendáře
+            <span className="block text-[11px] text-muted-foreground">
+              Opakovaná událost v perina@mediaface.cz — uvidíš ji i na iPhonu.
+              Změny rituálu se propíšou při uložení.
+            </span>
+          </span>
+        </label>
       </div>
 
       <div>

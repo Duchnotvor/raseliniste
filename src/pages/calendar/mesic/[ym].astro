@@ -5,7 +5,8 @@ import MonthView from "../../../components/MonthView";
 import { prisma } from "../../../lib/db";
 import { readSession } from "../../../lib/session";
 import { interpretMonth, CZ_MONTH_NAMES_NOM } from "../../../lib/month-interpretation";
-import { generateWeekRituals, generateCustomRituals, getMondayOfWeek } from "../../../lib/week-rituals";
+import { generateCustomRituals, getMondayOfWeek } from "../../../lib/week-rituals";
+import { ensureBuiltinRituals } from "../../../lib/rituals-server";
 import { generateAnniversaryEvents } from "../../../lib/anniversary-events";
 
 const session = await readSession(Astro.cookies);
@@ -100,10 +101,8 @@ for (const e of allEventsForGrid) {
 }
 
 // Načti rituály pro každý týden v rozsahu mřížky (ovlivní hasRitual flag)
-const userForRituals = await prisma.user.findUnique({
-  where: { id: session.uid },
-  select: { ritualTemplates: true },
-});
+// Od 2026-08-13 všechny (i vestavěné) z CustomRitual řádků
+await ensureBuiltinRituals(session.uid);
 const customRitualsRows = await prisma.customRitual.findMany({
   where: { userId: session.uid, active: true },
 });
@@ -113,13 +112,7 @@ const ritualsByDate = new Set<string>();
   const weekCursor = new Date(gridStart);
   while (weekCursor <= gridEnd) {
     const monday = getMondayOfWeek(weekCursor);
-    const weekRituals = [
-      ...generateWeekRituals(
-        monday,
-        userForRituals?.ritualTemplates as Record<string, string> | null,
-      ),
-      ...generateCustomRituals(monday, customRitualsRows),
-    ];
+    const weekRituals = generateCustomRituals(monday, customRitualsRows);
     for (const r of weekRituals) {
       const d = new Date(r.startsAt);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

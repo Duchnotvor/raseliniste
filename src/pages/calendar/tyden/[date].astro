@@ -4,7 +4,8 @@ import Base from "../../../layouts/Base.astro";
 import WeekView from "../../../components/WeekView";
 import { prisma } from "../../../lib/db";
 import { readSession } from "../../../lib/session";
-import { generateWeekRituals, generateCustomRituals, getMondayOfWeek, getSundayOfWeek } from "../../../lib/week-rituals";
+import { generateCustomRituals, getMondayOfWeek, getSundayOfWeek } from "../../../lib/week-rituals";
+import { ensureBuiltinRituals } from "../../../lib/rituals-server";
 import { generateAnniversaryEvents } from "../../../lib/anniversary-events";
 import { interpretWeek } from "../../../lib/week-interpretation";
 
@@ -52,17 +53,12 @@ const events = rawEvents.filter((e) => {
   return true;
 });
 
-// Generuj rituály — defaultní 3 + custom z DB
+// Generuj rituály — od 2026-08-13 všechny (i vestavěné) z CustomRitual řádků
+await ensureBuiltinRituals(session.uid);
 const customRitualsRows = await prisma.customRitual.findMany({
   where: { userId: session.uid, active: true },
 });
-const rituals = [
-  ...generateWeekRituals(
-    monday,
-    user.ritualTemplates as Record<string, string> | null,
-  ),
-  ...generateCustomRituals(monday, customRitualsRows),
-];
+const rituals = generateCustomRituals(monday, customRitualsRows);
 
 // Výročí — samostatná entita mimo Google/iCloud, virtual events do týdne
 const anniversariesRows = await prisma.anniversary.findMany({
