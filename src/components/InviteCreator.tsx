@@ -83,6 +83,13 @@ export default function InviteCreator() {
   const [copied, setCopied] = useState(false);
 
   const [invites, setInvites] = useState<InviteRow[]>([]);
+  // Gideon 2026-08-16: proběhlé schůzky nepotřebuje vidět — archiv na rozkliknutí
+  const [showPast, setShowPast] = useState(false);
+  const isPast = (inv: InviteRow) =>
+    !!inv.reservedSlot && new Date(inv.reservedSlot.endsAt || inv.reservedSlot.startsAt).getTime() < Date.now();
+  const currentInvites = invites.filter((i) => !isPast(i));
+  const pastInvites = invites.filter(isPast);
+  const visibleInvites = showPast ? [...currentInvites, ...pastInvites] : currentInvites;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [editBusy, setEditBusy] = useState(false);
@@ -527,14 +534,14 @@ export default function InviteCreator() {
 
       {/* Existující pozvánky */}
       <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="text-lg font-bold tracking-[-0.02em] mb-3">Vytvořené pozvánky ({invites.length})</h2>
-        {invites.length === 0 ? (
+        <h2 className="text-lg font-bold tracking-[-0.02em] mb-3">Vytvořené pozvánky ({currentInvites.length})</h2>
+        {visibleInvites.length === 0 && pastInvites.length === 0 ? (
           <div className="text-sm text-muted-foreground italic">Žádné pozvánky.</div>
         ) : (
           <div className="space-y-2">
             {/* Petr 2026-05-27 #22: mobile-friendly karty — větší touch
                 targets, info zalomené pod sebe, akce v gridu s text-sm. */}
-            {invites.map((inv) => {
+            {visibleInvites.map((inv) => {
               const url = `${APP_URL_BASE}/i/${inv.token}`;
               const isUniversal = !inv.contact && !inv.inviteeName;
               const isActive = inv.status !== "CANCELED" && inv.status !== "EXPIRED";
@@ -727,6 +734,15 @@ export default function InviteCreator() {
                 </div>
               );
             })}
+            {pastInvites.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowPast((v) => !v)}
+                className="text-xs text-muted-foreground hover:text-foreground pt-1"
+              >
+                {showPast ? "▾ Skrýt proběhlé" : `▸ Proběhlé schůzky (${pastInvites.length})`}
+              </button>
+            )}
           </div>
         )}
       </div>
