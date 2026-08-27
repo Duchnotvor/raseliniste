@@ -436,6 +436,78 @@ export async function confirmReservation(inviteId: string, ownerUserId: string):
 }
 
 // ---------------------------------------------------------------------------
+// Přímé založení schůzky adminem (Gideon 2026-08-27)
+// ---------------------------------------------------------------------------
+
+export interface DirectBookInput {
+  contactId: string;
+  type: "MEETING_ONLINE" | "MEETING_PRAGUE" | "MEETING_HOME";
+  startsAt: Date;
+  durationMin: number;
+  meetSource?: string | null; // CONTACT | COMPANY | null=auto
+  publicNote?: string;
+  internalNote?: string;
+}
+
+/**
+ * Gideon zná termín a zadává schůzku napřímo — bez výběru slotu hostem.
+ * Vytvoří invite rovnou ve stavu RESERVED s daným slotem a projede standardní
+ * confirmReservation() (Google event s vybraným Meetem + potvrzovací mail
+ * s .ics). Rules engine termín NEBLOKUJE — jen vrátí varování (Gideon ví,
+ * co zadává); kolize se ukážou v UI.
+ */
+export async function directBook(input: DirectBookInput, ownerUserId: string): Promise<{
+  inviteId: string;
+  meetLink: string | null;
+  warnings: string[];
+}> {
+  const endsAt = new Date(input.startsAt.getTime() + input.durationMin * 60_000);
+  if (isNaN(input.startsAt.getTime())) throw new Error("Neplatné datum/čas.");
+  if (input.startsAt < new Date()) throw new Error("Termín je v minulosti.");
+
+  // Varování (kolize apod.) — informativní, nezastavují
+  const evaluation = await evaluateSlot({
+    type: input.type,
+    startsAt: input.startsAt,
+    endsAt,
+  });
+  const warnings = evaluation.signals.map((sig) => sig.message);
+
+  const { invite } = await createInvite({
+    contactId: input.contactId,
+    mode: "CLIENT",
+    meetingType: input.type === "MEETING_ONLINE" ? "CHOICE_ONLINE" : input.type === "MEETING_PRAGUE" ? "CHOICE_PRAGUE" : "CHOICE_HOME",
+    slotDurationMin: input.durationMin,
+    internalNote: input.internalNote,
+    publicNote: input.publicNote,
+    meetSource: input.meetSource ?? null,
+  });
+
+  await prisma.bookingInvite.update({
+    where: { id: invite.id },
+    data: {
+      status: "RESERVED",
+      reservedSlot: {
+        startsAt: input.startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        type: input.type,
+      },
+    },
+  });
+
+  let confirmation;
+  try {
+    confirmation = await confirmReservation(invite.id, ownerUserId);
+  } catch (e) {
+    // Google/mail selhal → uklidit čerstvý invite (RESERVED by jinak blokoval
+    // slot do vypršení platnosti) a chybu propustit do UI
+    await prisma.bookingInvite.delete({ where: { id: invite.id } }).catch(() => null);
+    throw e;
+  }
+  return { inviteId: invite.id, meetLink: confirmation.meetLink, warnings };
+}
+
+// ---------------------------------------------------------------------------
 // Cancel (admin)
 // ---------------------------------------------------------------------------
 

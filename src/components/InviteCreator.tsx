@@ -89,6 +89,82 @@ export default function InviteCreator() {
       .catch(() => null);
   }, [selectedContactId, universal]);
   const onlineCapable = meetingType === "CHOICE_ONLINE" || meetingType === "CHOICE_ANY";
+  // Gideon 2026-08-27: „Zadat termín napevno" — Gideon zná termín, schůzka
+  // se založí rovnou (Google event + pozvánkový mail), host nic nevybírá.
+  const [fixedMode, setFixedMode] = useState(false);
+  const [fixedDate, setFixedDate] = useState("");
+  const [fixedTime, setFixedTime] = useState("10:00");
+  const [fixedType, setFixedType] = useState<"MEETING_ONLINE" | "MEETING_PRAGUE" | "MEETING_HOME">("MEETING_ONLINE");
+  const [directResult, setDirectResult] = useState<{ meetLink: string | null; warnings: string[] } | null>(null);
+  // Gideon 2026-08-27: odeslání pozvánkového linku mailem (s náhledem) / SMS
+  const [sendPanelId, setSendPanelId] = useState<string | null>(null);
+  const [sendDraft, setSendDraft] = useState<{ emailTo: string | null; subject: string; body: string; smsTo: string | null; sms: string } | null>(null);
+  const [sendChannel, setSendChannel] = useState<"email" | "sms">("email");
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendResult, setSendResult] = useState<string | null>(null);
+
+  async function openSendPanel(invId: string) {
+    if (sendPanelId === invId) { setSendPanelId(null); return; }
+    setSendPanelId(invId);
+    setSendDraft(null);
+    setSendResult(null);
+    setSendChannel("email");
+    const res = await fetch(`/api/booking/${invId}/send-invite`).catch(() => null);
+    const d = await res?.json().catch(() => null);
+    if (d?.ok) {
+      setSendDraft({ emailTo: d.email.to, subject: d.email.subject, body: d.email.body, smsTo: d.sms.to, sms: d.sms.message });
+    } else {
+      setSendResult(d?.error ?? "Načtení návrhu zprávy selhalo.");
+    }
+  }
+
+  async function sendInvite(invId: string) {
+    if (!sendDraft) return;
+    setSendBusy(true);
+    setSendResult(null);
+    try {
+      const payload = sendChannel === "email"
+        ? { channel: "email", subject: sendDraft.subject, body: sendDraft.body }
+        : { channel: "sms", message: sendDraft.sms };
+      const res = await fetch(`/api/booking/${invId}/send-invite`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setSendResult(d?.error ?? `Odeslání selhalo (HTTP ${res.status})`); return; }
+      setSendResult(`Odesláno (${d.channel === "sms" ? "SMS" : "e-mail"} → ${d.to}).`);
+    } catch { setSendResult("Síťová chyba."); }
+    finally { setSendBusy(false); }
+  }
+
+  async function createDirect() {
+    setBusy(true);
+    setError(null);
+    setDirectResult(null);
+    try {
+      const res = await fetch("/api/booking/direct", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contactId: selectedContactId,
+          type: fixedType,
+          date: fixedDate,
+          time: fixedTime,
+          durationMin: parseInt(duration),
+          meetSource: fixedType === "MEETING_ONLINE" ? (meetSource || null) : null,
+          publicNote: publicNote.trim() || undefined,
+          internalNote: internalNote.trim() || undefined,
+          contactEmail: selectedNeedsEmail && newEmail.trim() ? newEmail.trim() : undefined,
+        }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setError(d?.error ?? `Založení selhalo (HTTP ${res.status})`); return; }
+      setDirectResult({ meetLink: d.meetLink ?? null, warnings: d.warnings ?? [] });
+      void loadInvites();
+    } catch (e) { setError(e instanceof Error ? e.message : "Síťová chyba"); }
+    finally { setBusy(false); }
+  }
   // Petr 2026-05-25: veřejná poznámka pro hosta. Zobrazí se v pickeru,
   // v Google eventu (description) a v .ics mailové příloze.
   const [publicNote, setPublicNote] = useState("");
@@ -356,6 +432,18 @@ export default function InviteCreator() {
         </div>
 
         {!universal && (
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={fixedMode} onChange={(e) => { setFixedMode(e.target.checked); setDirectResult(null); }} className="mt-0.5" />
+            <span className="text-sm">
+              Zadat termín napevno
+              <span className="block text-xs text-muted-foreground">
+                Znáš datum a čas — schůzka se rovnou založí v kalendáři a hostovi odejde pozvánkový mail. Bez výběru slotu.
+              </span>
+            </span>
+          </label>
+        )}
+
+        {!universal && (
           <div>
             <label className="text-xs font-mono uppercase text-muted-foreground">Kontakt</label>
             <Input
@@ -397,7 +485,31 @@ export default function InviteCreator() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
+        {fixedMode && !universal && (
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-mono uppercase text-muted-foreground">Datum</label>
+              <input type="date" value={fixedDate} onChange={(e) => setFixedDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-black/30 border border-white/10 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-mono uppercase text-muted-foreground">Čas</label>
+              <input type="time" value={fixedTime} onChange={(e) => setFixedTime(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-black/30 border border-white/10 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-mono uppercase text-muted-foreground">Typ</label>
+              <select value={fixedType} onChange={(e) => setFixedType(e.target.value as typeof fixedType)}
+                className="w-full px-3 py-2 rounded-md bg-black/30 border border-white/10 text-sm">
+                <option value="MEETING_ONLINE">Online</option>
+                <option value="MEETING_PRAGUE">Osobně v Praze</option>
+                <option value="MEETING_HOME">U mě</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {!(fixedMode && !universal) && <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-mono uppercase text-muted-foreground">Vztah</label>
             <select
@@ -423,9 +535,9 @@ export default function InviteCreator() {
               <option value="CHOICE_LUNCH_PRAGUE">Oběd v Praze (90 min, 11:00–13:30)</option>
             </select>
           </div>
-        </div>
+        </div>}
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid ${fixedMode && !universal ? "grid-cols-1" : "grid-cols-2"} gap-3`}>
           <div>
             <label className="text-xs font-mono uppercase text-muted-foreground">
               Délka
@@ -444,7 +556,7 @@ export default function InviteCreator() {
               <option value="120">2 hodiny</option>
             </select>
           </div>
-          <div>
+          {!(fixedMode && !universal) && <div>
             <label className="text-xs font-mono uppercase text-muted-foreground">Platnost (dní)</label>
             <select
               value={validity}
@@ -456,10 +568,10 @@ export default function InviteCreator() {
               <option value="30">30 dní</option>
               <option value="90">90 dní</option>
             </select>
-          </div>
+          </div>}
         </div>
 
-        <div>
+        {!(fixedMode && !universal) && <div>
           <label className="text-xs font-mono uppercase text-muted-foreground">
             Sloty dostupné od (volitelně)
           </label>
@@ -473,9 +585,9 @@ export default function InviteCreator() {
             Host nedostane sloty před tímto datem. Prázdné = jen globální lead time
             ({mode === "CLIENT" ? "72 h klient" : "24 h přítel"}).
           </p>
-        </div>
+        </div>}
 
-        <label className="flex items-start gap-2 cursor-pointer">
+        {!(fixedMode && !universal) && <label className="flex items-start gap-2 cursor-pointer">
           <input
             type="checkbox"
             checked={allowWeekend}
@@ -489,10 +601,10 @@ export default function InviteCreator() {
               Platí jen pro tuhle pozvánku.
             </span>
           </span>
-        </label>
+        </label>}
 
         {/* Gideon 2026-08-24: čí Meet použít u online schůzky */}
-        {onlineCapable && meetOptions && (meetOptions.contactMeetLink || meetOptions.companyMeetLink) && (
+        {(fixedMode ? fixedType === "MEETING_ONLINE" : onlineCapable) && meetOptions && (meetOptions.contactMeetLink || meetOptions.companyMeetLink) && (
           <div>
             <label className="text-xs font-mono uppercase text-muted-foreground block mb-1">
               Meet místnost (online schůzka)
@@ -543,9 +655,26 @@ export default function InviteCreator() {
           <Input value={internalNote} onChange={(e) => setInternalNote(e.target.value)} placeholder="O čem to bude…" />
         </div>
 
-        <Button onClick={create} disabled={busy || (!universal && !selectedContactId) || (selectedNeedsEmail && !/^\S+@\S+\.\S+$/.test(newEmail.trim()))}>
-          {busy ? <><Loader2 className="animate-spin" /> Vytvářím…</> : <><Send /> Vygenerovat link</>}
+        <Button
+          onClick={fixedMode && !universal ? createDirect : create}
+          disabled={busy || (!universal && !selectedContactId) || (selectedNeedsEmail && !/^\S+@\S+\.\S+$/.test(newEmail.trim())) || (fixedMode && !universal && !fixedDate)}
+        >
+          {busy
+            ? <><Loader2 className="animate-spin" /> Vytvářím…</>
+            : fixedMode && !universal
+              ? <><Send /> Založit schůzku a poslat pozvánku</>
+              : <><Send /> Vygenerovat link</>}
         </Button>
+
+        {directResult && (
+          <div className="rounded-lg border border-[var(--tint-sage)]/40 bg-[var(--tint-sage)]/10 px-4 py-3 text-sm space-y-1">
+            <div className="font-semibold">Schůzka založena — event je v kalendáři a hostovi odešel potvrzovací mail.</div>
+            {directResult.meetLink && <div className="font-mono text-xs">Meet: {directResult.meetLink}</div>}
+            {directResult.warnings.length > 0 && (
+              <div className="text-xs text-muted-foreground">Upozornění: {directResult.warnings.join(" · ")}</div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div
@@ -650,6 +779,15 @@ export default function InviteCreator() {
                     )}
                     {canEdit && (
                       <button
+                        onClick={() => void openSendPanel(inv.id)}
+                        className="flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md border border-foreground/30 bg-foreground text-background hover:opacity-90"
+                        title="Poslat hostovi odkaz na výběr termínu — mailem (s náhledem) nebo SMS"
+                      >
+                        <Mail className="size-4" /> {sendPanelId === inv.id ? "Zavřít odeslání" : "Poslat pozvánku"}
+                      </button>
+                    )}
+                    {canEdit && (
+                      <button
                         onClick={() => (isEditing ? setEditingId(null) : startEdit(inv))}
                         className="flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-md border border-border bg-card hover:bg-accent text-foreground"
                         title="Upravit parametry — jde to, dokud si host nevybral termín"
@@ -674,6 +812,61 @@ export default function InviteCreator() {
                       </button>
                     )}
                   </div>
+
+                  {/* Odeslání pozvánkového linku — náhled mailu / SMS (Gideon 2026-08-27) */}
+                  {sendPanelId === inv.id && (
+                    <div className="mt-3 rounded-md border border-border bg-card p-3 space-y-3">
+                      {!sendDraft ? (
+                        <div className="text-sm text-muted-foreground flex items-center gap-2">
+                          {sendResult ? sendResult : <><Loader2 className="size-4 animate-spin" /> Připravuji zprávu…</>}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => setSendChannel("email")}
+                              className={`px-3 py-1.5 rounded-md text-xs font-mono ${sendChannel === "email" ? "bg-foreground text-background" : "bg-white/5 text-muted-foreground"}`}>
+                              E-mail{sendDraft.emailTo ? ` (${sendDraft.emailTo})` : " — chybí adresa"}
+                            </button>
+                            <button type="button" onClick={() => setSendChannel("sms")}
+                              className={`px-3 py-1.5 rounded-md text-xs font-mono ${sendChannel === "sms" ? "bg-foreground text-background" : "bg-white/5 text-muted-foreground"}`}>
+                              SMS{sendDraft.smsTo ? ` (${sendDraft.smsTo})` : " — chybí číslo"}
+                            </button>
+                          </div>
+                          {sendChannel === "email" ? (
+                            <>
+                              <div>
+                                <label className="text-[10px] font-mono uppercase text-muted-foreground">Předmět</label>
+                                <input value={sendDraft.subject}
+                                  onChange={(e) => setSendDraft((d) => d && ({ ...d, subject: e.target.value }))}
+                                  className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-mono uppercase text-muted-foreground">Text mailu (odkaz nech uvnitř)</label>
+                                <textarea value={sendDraft.body} rows={8}
+                                  onChange={(e) => setSendDraft((d) => d && ({ ...d, body: e.target.value }))}
+                                  className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm font-mono leading-relaxed" />
+                              </div>
+                            </>
+                          ) : (
+                            <div>
+                              <label className="text-[10px] font-mono uppercase text-muted-foreground">Text SMS ({sendDraft.sms.length} znaků)</label>
+                              <textarea value={sendDraft.sms} rows={3}
+                                onChange={(e) => setSendDraft((d) => d && ({ ...d, sms: e.target.value }))}
+                                className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm font-mono leading-relaxed" />
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Button size="sm" onClick={() => void sendInvite(inv.id)}
+                              disabled={sendBusy || (sendChannel === "email" ? !sendDraft.emailTo : !sendDraft.smsTo)}>
+                              {sendBusy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                              Odeslat {sendChannel === "email" ? "e-mail" : "SMS"}
+                            </Button>
+                            {sendResult && <span className="text-sm text-muted-foreground">{sendResult}</span>}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {/* Inline editace parametrů (jen PENDING/VIEWED) */}
                   {isEditing && editForm && (
