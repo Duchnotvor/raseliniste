@@ -86,6 +86,7 @@ model User {
   meetNotes        MeetNote[]
   meetSpaces       MeetSpace[]
   plaudNotes       PlaudNote[]
+  companyMeetLinks     CompanyMeetLink[]
   // EncryptionKey nemá user FK — klíče jsou global (jeden klíč šifruje
   // všechny usery v single-user instance + key versioning pro rotace).
 
@@ -1418,6 +1419,12 @@ model BookingInvite {
   // sloty (online i prezenční) se nabízejí i v SO/NE, v hodinách dle typu.
   allowWeekend    Boolean             @default(false)
 
+  // Gideon 2026-08-24: čí Meet místnost použít u online schůzky.
+  // "CONTACT" = trvalý link kontaktu · "COMPANY" = firemní link (dle
+  // Contact.company → CompanyMeetLink; bez nahrávání/zápisu — cizí místnost)
+  // · null = auto (link kontaktu pokud existuje, jinak vygenerovat nový).
+  meetSource      String?
+
   events          CalendarEvent[]
 
   createdAt       DateTime            @default(now())
@@ -1452,6 +1459,26 @@ model DayNote {
  *
  * Čas v Praha TZ. Při generování virtual events je převeden přes pragueDate().
  */
+/**
+ * Gideon 2026-08-24: Meet link na úrovni FIRMY (Contact.company z vCard ORG).
+ * Jeden trvalý link pro všechny kontakty stejné firmy — u booking pozvánky
+ * jde vybrat "firemní Meet" místo kontaktního/generovaného. Firemní místnost
+ * vlastní klient, Rašeliniště ji nenahrává a nedělá z ní zápis.
+ */
+model CompanyMeetLink {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  company   String   // přesná hodnota Contact.company
+  meetLink  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, company])
+}
+
 model CustomRitual {
   id          String   @id @default(cuid())
   userId      String

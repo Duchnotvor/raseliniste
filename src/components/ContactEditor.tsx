@@ -32,6 +32,7 @@ export interface Contact {
   isTeam: boolean;
   todoistUserId: string | null;
   defaultMeetLink: string | null;
+  company?: string | null;
   clientTag: string | null;
   aliases: string[];
   clientTagAliases: string[];
@@ -63,6 +64,20 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
   const [isTeam, setIsTeam] = useState(contact?.isTeam ?? false);
   const [todoistUserId, setTodoistUserId] = useState(contact?.todoistUserId ?? "");
   const [defaultMeetLink, setDefaultMeetLink] = useState(contact?.defaultMeetLink ?? "");
+  // Gideon 2026-08-24: firemní Meet link (per Contact.company, sdílený všemi
+  // kontakty stejné firmy) — CRUD přes /api/company-meet
+  const [companyMeetLink, setCompanyMeetLink] = useState("");
+  const [companyMeetLoaded, setCompanyMeetLoaded] = useState("");
+  useEffect(() => {
+    const company = contact?.company?.trim();
+    if (!company) return;
+    fetch(`/api/company-meet?company=${encodeURIComponent(company)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.ok) { setCompanyMeetLink(d.meetLink ?? ""); setCompanyMeetLoaded(d.meetLink ?? ""); }
+      })
+      .catch(() => null);
+  }, [contact?.company]);
   const [clientTag, setClientTag] = useState(contact?.clientTag ?? "");
   // Aliases — input je čárkou oddělený řetězec, parsujeme při uložení.
   // Display chip list pod inputem ukazuje aktuálně uložené hodnoty.
@@ -137,6 +152,20 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
       if (!res.ok) {
         setError(data.error ?? "Uložení selhalo.");
         return;
+      }
+      // Firemní Meet link — uložit jen při změně; chybu ukázat, nezavírat
+      const company = contact?.company?.trim();
+      if (company && companyMeetLink.trim() !== companyMeetLoaded.trim()) {
+        const cm = await fetch("/api/company-meet", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ company, meetLink: companyMeetLink.trim() || null }),
+        }).catch(() => null);
+        if (!cm?.ok) {
+          const cd = await cm?.json().catch(() => null);
+          setError(`Kontakt uložen, ale firemní Meet link se neuložil: ${cd?.error ?? "chyba"}`);
+          return;
+        }
       }
       // FIX 2026-07-31: uloženo lokálně, ale push do iCloudu selhal —
       // NEZAVÍRAT mlčky (iCloud pull by změnu později přepsal).
@@ -276,6 +305,24 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
                 přijde mu v potvrzovacím mailu i v kalendářové události.
               </p>
             </div>
+
+            {contact?.company?.trim() && (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono block mb-1">
+                  Firemní Meet link — {contact.company} (volitelně)
+                </label>
+                <Input
+                  value={companyMeetLink}
+                  onChange={(e) => setCompanyMeetLink(e.target.value)}
+                  placeholder="https://meet.google.com/abc-defg-hij"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                  Platí pro všechny kontakty firmy „{contact.company}". U pozvánky pak
+                  jde vybrat „firemní Meet" — schůzka se založí s tímhle linkem, ale
+                  Rašeliniště ji nenahrává a nedělá z ní zápis (cizí místnost).
+                </p>
+              </div>
+            )}
 
             <AliasField
               label="Aliases (čárkou oddělené)"

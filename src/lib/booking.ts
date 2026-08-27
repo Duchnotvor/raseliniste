@@ -45,6 +45,8 @@ export interface CreateInviteInput {
   availableFrom?: Date | null;
   /** Gideon 2026-08-10: výjimečně nabídnout i SO/NE sloty (online i prezenční). */
   allowWeekend?: boolean;
+  /** Gideon 2026-08-24: čí Meet u online schůzky — "CONTACT" | "COMPANY" | null=auto. */
+  meetSource?: string | null;
   /**
    * Petr 2026-05-25: veřejná poznámka — host ji uvidí v rezervačním pickeru,
    * v Google kalendářovém eventu (description) a v .ics popisu události.
@@ -107,6 +109,7 @@ export async function createInvite(input: CreateInviteInput): Promise<{
       inviteePhone: contactSnapshot.phone,
       availableFrom: input.availableFrom ?? null,
       allowWeekend: input.allowWeekend ?? false,
+      meetSource: input.meetSource ?? null,
     },
     select: { id: true, token: true },
   });
@@ -276,7 +279,7 @@ export async function confirmReservation(inviteId: string, ownerUserId: string):
 }> {
   const invite = await prisma.bookingInvite.findUnique({
     where: { id: inviteId },
-    include: { contact: { select: { defaultMeetLink: true } } },
+    include: { contact: { select: { defaultMeetLink: true, company: true } } },
   });
   if (!invite) throw new Error("Pozvánka neexistuje.");
   if (invite.status === "CONFIRMED") {
@@ -328,8 +331,24 @@ export async function confirmReservation(inviteId: string, ownerUserId: string):
   // (Contact.defaultMeetLink). Pokud ji má a schůzka je online, použije se
   // JEHO link — negenerujeme nový přes Google conferenceData. Link jde do
   // location (Google/Apple Calendar ho ukáže jako klikatelný) i do popisu.
-  const contactMeetLink =
-    slot.type === "MEETING_ONLINE" ? (invite.contact?.defaultMeetLink?.trim() || null) : null;
+  // Gideon 2026-08-24: volba zdroje Meetu na pozvánce. COMPANY = firemní
+  // místnost klienta (CompanyMeetLink dle Contact.company) — tu Rašeliniště
+  // nenahrává a nedělá z ní zápis (cizí místnost, není v MeetSpace).
+  let contactMeetLink: string | null = null;
+  if (slot.type === "MEETING_ONLINE") {
+    if (invite.meetSource === "COMPANY" && invite.contact?.company) {
+      const companyRow = await prisma.companyMeetLink.findUnique({
+        where: { userId_company: { userId: ownerUserId, company: invite.contact.company } },
+      });
+      contactMeetLink = companyRow?.meetLink?.trim() || null;
+      if (!contactMeetLink) {
+        console.warn(`[booking.confirm] invite ${invite.id}: meetSource=COMPANY, ale firma "${invite.contact.company}" nemá CompanyMeetLink — fallback na generovaný Meet.`);
+      }
+    } else if (invite.meetSource === "CONTACT" || !invite.meetSource) {
+      // explicitní volba kontaktu, nebo auto (dosavadní chování)
+      contactMeetLink = invite.contact?.defaultMeetLink?.trim() || null;
+    }
+  }
 
   // Location pro Apple/Google Maps ETA. Konkrétní adresu Petr nemá v UI,
   // posíláme jen indikativní text. Pro Time to Leave funkční je třeba

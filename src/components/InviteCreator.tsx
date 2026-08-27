@@ -23,6 +23,7 @@ interface InviteRow {
   validUntil: string;
   availableFrom: string | null;
   allowWeekend: boolean;
+  meetSource: string | null;
   publicNote: string | null;
   internalNote: string | null;
   inviteeName: string | null;
@@ -39,6 +40,7 @@ interface EditForm {
   slotDurationMin: string;
   availableFrom: string; // YYYY-MM-DD | ""
   allowWeekend: boolean;
+  meetSource: string;    // "" = auto | CONTACT | COMPANY
   validUntil: string;    // YYYY-MM-DD
   publicNote: string;
   internalNote: string;
@@ -74,6 +76,19 @@ export default function InviteCreator() {
   const [availableFrom, setAvailableFrom] = useState("");
   // Gideon 2026-08-10: výjimečné povolení víkendu pro tuhle pozvánku
   const [allowWeekend, setAllowWeekend] = useState(false);
+  // Gideon 2026-08-24: čí Meet u online schůzky — auto / kontaktu / firemní
+  const [meetSource, setMeetSource] = useState("");
+  const [meetOptions, setMeetOptions] = useState<{ contactMeetLink: string | null; company: string | null; companyMeetLink: string | null } | null>(null);
+  useEffect(() => {
+    setMeetSource("");
+    setMeetOptions(null);
+    if (!selectedContactId || universal) return;
+    fetch(`/api/booking/meet-options?contactId=${encodeURIComponent(selectedContactId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.ok) setMeetOptions(d); })
+      .catch(() => null);
+  }, [selectedContactId, universal]);
+  const onlineCapable = meetingType === "CHOICE_ONLINE" || meetingType === "CHOICE_ANY";
   // Petr 2026-05-25: veřejná poznámka pro hosta. Zobrazí se v pickeru,
   // v Google eventu (description) a v .ics mailové příloze.
   const [publicNote, setPublicNote] = useState("");
@@ -106,6 +121,7 @@ export default function InviteCreator() {
       slotDurationMin: String(inv.slotDurationMin),
       availableFrom: inv.availableFrom ? inv.availableFrom.slice(0, 10) : "",
       allowWeekend: inv.allowWeekend ?? false,
+      meetSource: inv.meetSource ?? "",
       validUntil: inv.validUntil ? inv.validUntil.slice(0, 10) : "",
       publicNote: inv.publicNote ?? "",
       internalNote: inv.internalNote ?? "",
@@ -126,6 +142,7 @@ export default function InviteCreator() {
           slotDurationMin: parseInt(editForm.slotDurationMin),
           availableFrom: editForm.availableFrom || null,
           allowWeekend: editForm.allowWeekend,
+          meetSource: editForm.meetSource || null,
           validUntil: editForm.validUntil || undefined,
           publicNote: editForm.publicNote || null,
           internalNote: editForm.internalNote || null,
@@ -193,6 +210,7 @@ export default function InviteCreator() {
           internalNote: internalNote.trim() || undefined,
           availableFrom: availableFrom.trim() || undefined,
           allowWeekend: allowWeekend || undefined,
+          meetSource: meetSource || undefined,
           publicNote: publicNote.trim() || undefined,
           contactEmail: !universal && selectedNeedsEmail && newEmail.trim() ? newEmail.trim() : undefined,
         }),
@@ -473,6 +491,37 @@ export default function InviteCreator() {
           </span>
         </label>
 
+        {/* Gideon 2026-08-24: čí Meet použít u online schůzky */}
+        {onlineCapable && meetOptions && (meetOptions.contactMeetLink || meetOptions.companyMeetLink) && (
+          <div>
+            <label className="text-xs font-mono uppercase text-muted-foreground block mb-1">
+              Meet místnost (online schůzka)
+            </label>
+            <div className="space-y-1.5">
+              <label className="flex items-start gap-2 cursor-pointer text-sm">
+                <input type="radio" name="meetSource" checked={meetSource === ""} onChange={() => setMeetSource("")} className="mt-1" />
+                <span>Vygenerovat nový Meet<span className="block text-xs text-muted-foreground">Standardně — schůzka se dá nahrávat a udělat z ní zápis.</span></span>
+              </label>
+              {meetOptions.contactMeetLink && (
+                <label className="flex items-start gap-2 cursor-pointer text-sm">
+                  <input type="radio" name="meetSource" checked={meetSource === "CONTACT"} onChange={() => setMeetSource("CONTACT")} className="mt-1" />
+                  <span>Meet kontaktu<span className="block text-xs text-muted-foreground font-mono">{meetOptions.contactMeetLink}</span></span>
+                </label>
+              )}
+              {meetOptions.companyMeetLink && (
+                <label className="flex items-start gap-2 cursor-pointer text-sm">
+                  <input type="radio" name="meetSource" checked={meetSource === "COMPANY"} onChange={() => setMeetSource("COMPANY")} className="mt-1" />
+                  <span>
+                    Firemní Meet{meetOptions.company ? ` — ${meetOptions.company}` : ""}
+                    <span className="block text-xs text-muted-foreground font-mono">{meetOptions.companyMeetLink}</span>
+                    <span className="block text-xs text-muted-foreground">Cizí místnost — bez nahrávání a bez zápisu, jen se založí schůzka.</span>
+                  </span>
+                </label>
+              )}
+            </div>
+          </div>
+        )}
+
         <div>
           <label className="text-xs font-mono uppercase text-muted-foreground">
             Poznámka pro hosta (volitelně)
@@ -696,6 +745,18 @@ export default function InviteCreator() {
                         />
                         Výjimečně povolit i víkend
                       </label>
+                      <div>
+                        <label className="text-[10px] font-mono uppercase text-muted-foreground">Meet místnost (online)</label>
+                        <select
+                          value={editForm.meetSource}
+                          onChange={(e) => setEditForm((f) => f && ({ ...f, meetSource: e.target.value }))}
+                          className="w-full px-2 py-1.5 rounded-md bg-black/30 border border-white/10 text-sm"
+                        >
+                          <option value="">Vygenerovat nový (se zápisem)</option>
+                          <option value="CONTACT">Meet kontaktu</option>
+                          <option value="COMPANY">Firemní Meet (bez zápisu)</option>
+                        </select>
+                      </div>
                       <div>
                         <label className="text-[10px] font-mono uppercase text-muted-foreground">Veřejná poznámka (host ji uvidí)</label>
                         <textarea
