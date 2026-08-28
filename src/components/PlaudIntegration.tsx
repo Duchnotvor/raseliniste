@@ -64,8 +64,8 @@ export default function PlaudIntegration() {
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Přepisy a souhrny nahrávek z Plaud diktafonu se automaticky stahují do Studánky
-        (každých 30 minut). Přepis dělá Plaud cloud — bez dalších nákladů na AI.
+        Nahrávky z Plaud diktafonu se automaticky stahují do Studánky (každých
+        30 minut) a přepisují se u nás (Gemini) včetně souhrnu — Plaudu se za nic neplatí.
       </p>
 
       {status.connected && (
