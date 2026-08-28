@@ -231,7 +231,12 @@ const SYNC_WINDOW_DAYS = 21;
  */
 export async function syncPlaud(userId: string): Promise<PlaudSyncStats> {
   const stats: PlaudSyncStats = { listed: 0, created: 0, transcribing: 0, errors: 0 };
-  const since = Date.now() - SYNC_WINDOW_DAYS * 86400000;
+  // První sync (žádné PlaudNote v DB) = plný backfill — Gideonovy nahrávky
+  // můžou být starší než 21denní okno (2026-09: nahrávky z 30. 7. by jinak
+  // první připojení tiše přeskočilo a „nenašlo nic").
+  const existingCount = await prisma.plaudNote.count({ where: { userId } });
+  const windowDays = existingCount === 0 ? 365 : SYNC_WINDOW_DAYS;
+  const since = Date.now() - windowDays * 86400000;
 
   interface FileRow { id: string; name?: string; created_at?: string; duration?: number }
   const files: FileRow[] = [];
