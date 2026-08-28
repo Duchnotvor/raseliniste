@@ -27,6 +27,7 @@ interface Contact {
   id: string;
   displayName: string;
   firstName: string | null;
+  nickname: string | null;
   lastName: string | null;
   company: string | null;
   note: string | null;
@@ -830,6 +831,7 @@ export default function ContactsTable({ initialTotal, icloudStatus, googleStatus
             <tr>
               <th className="px-2 py-2 text-left w-[150px]">Jméno</th>
               <th className="px-2 py-2 text-left w-[120px]">Příjmení</th>
+              <th className="px-2 py-2 text-left w-[110px]">Přezdívka</th>
               <th className="px-2 py-2 text-left w-[120px]">Firma</th>
               <th className="px-2 py-2 text-left w-[140px]">Telefon</th>
               <th className="px-2 py-2 text-left w-[120px]">Telefon 2</th>
@@ -845,11 +847,11 @@ export default function ContactsTable({ initialTotal, icloudStatus, googleStatus
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={13} className="px-3 py-12 text-center text-sm text-muted-foreground">
+              <tr><td colSpan={14} className="px-3 py-12 text-center text-sm text-muted-foreground">
                 <Loader2 className="size-5 animate-spin mx-auto mb-2" /> Načítám…
               </td></tr>
             ) : contacts.length === 0 ? (
-              <tr><td colSpan={13} className="px-3 py-12 text-center text-sm text-muted-foreground italic">
+              <tr><td colSpan={14} className="px-3 py-12 text-center text-sm text-muted-foreground italic">
                 Žádné kontakty v aktuálním filtru.
               </td></tr>
             ) : contacts.map((c) => {
@@ -859,6 +861,7 @@ export default function ContactsTable({ initialTotal, icloudStatus, googleStatus
                 <tr key={c.id} data-row-id={c.id} className={`border-b border-white/5 hover:bg-white/[0.02] ${isDirty ? "bg-[var(--tint-rose)]/[0.06]" : ""}`}>
                   <EditableCell value={eff.firstName ?? ""} onSave={(v) => editCell(c.id, "firstName", v)} />
                   <EditableCell value={eff.lastName ?? ""} onSave={(v) => editCell(c.id, "lastName", v)} />
+                  <EditableCell value={eff.nickname ?? ""} onSave={(v) => editCell(c.id, "nickname", v)} />
                   <EditableCell value={eff.company ?? ""} onSave={(v) => editCell(c.id, "company", v)} />
                   <EditableCell
                     value={eff.phones[0]?.number ?? ""}
@@ -1021,6 +1024,7 @@ export default function ContactsTable({ initialTotal, icloudStatus, googleStatus
               displayName: eff.displayName,
               firstName: eff.firstName,
               lastName: eff.lastName,
+              nickname: eff.nickname ?? null,
               firstNameVocative: eff.vocative ?? null,
               greetingOverride: eff.greetingOverride ?? null,
               note: eff.note,

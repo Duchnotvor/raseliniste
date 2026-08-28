@@ -162,6 +162,7 @@ export interface VCardContact {
   firstName: string;
   lastName: string;
   org: string | null;
+  nickname?: string | null;
   phones: { number: string; label: string | null }[];
   emails: { email: string; label: string | null }[];
   addressLines: string[];
@@ -194,6 +195,7 @@ export function parseVCardFull(raw: string): VCardContact | null {
     firstName: "",
     lastName: "",
     org: null,
+    nickname: null,
     phones: [],
     emails: [],
     addressLines: [],
@@ -242,6 +244,10 @@ export function parseVCardFull(raw: string): VCardContact | null {
         const label = extractLabel(params) ?? null;
         const em = decoded.trim().toLowerCase();
         if (em) contact.emails.push({ email: em, label });
+        break;
+      }
+      case "NICKNAME": {
+        contact.nickname = decoded.trim() || null;
         break;
       }
       case "ORG": {
@@ -358,6 +364,7 @@ export function buildVCard(contact: VCardContact): string {
   lines.push(`N:${escapeValue(contact.lastName)};${escapeValue(contact.firstName)};;;`);
 
   if (contact.org) lines.push(`ORG:${escapeValue(contact.org)}`);
+  if (contact.nickname) lines.push(`NICKNAME:${escapeValue(contact.nickname)}`);
 
   for (const p of contact.phones) {
     const param = p.label ? `;TYPE=${vcardTypeFromLabel(p.label)}` : "";

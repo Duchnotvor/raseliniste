@@ -169,6 +169,9 @@ function buildPersonFromContact(
   if (c.company) {
     person.organizations = [{ name: c.company }];
   }
+  if (c.nickname) {
+    person.nicknames = [{ value: c.nickname }];
+  }
   if (c.addressLines.length > 0) {
     person.addresses = c.addressLines.map((line) => ({
       formattedValue: line,
@@ -190,7 +193,7 @@ function buildPersonFromContact(
   return person;
 }
 
-const PERSON_UPDATE_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,birthdays,biographies";
+const PERSON_UPDATE_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,birthdays,biographies,nicknames";
 
 export async function syncIcloudToGoogle(
   userId: string,
@@ -307,6 +310,7 @@ function googlePersonToCore(p: people_v1.Schema$Person): {
   firstName: string | null;
   lastName: string | null;
   company: string | null;
+  nickname: string | null;
   addressLines: string[];
   birthYear: number | null;
   birthMonth: number | null;
@@ -321,6 +325,7 @@ function googlePersonToCore(p: people_v1.Schema$Person): {
     firstName: name?.givenName ?? null,
     lastName: name?.familyName ?? null,
     company: p.organizations?.[0]?.name ?? null,
+    nickname: p.nicknames?.[0]?.value ?? null,
     addressLines: (p.addresses ?? []).map((a) => a.formattedValue ?? "").filter(Boolean),
     birthYear: p.birthdays?.[0]?.date?.year ?? null,
     birthMonth: p.birthdays?.[0]?.date?.month ?? null,
@@ -401,6 +406,7 @@ export async function syncWithGoogle(
                 firstName: core.firstName,
                 lastName: core.lastName,
                 company: core.company,
+                nickname: core.nickname,
                 addressLines: core.addressLines,
                 birthYear: core.birthYear,
                 birthMonth: core.birthMonth,
@@ -431,6 +437,7 @@ export async function syncWithGoogle(
               firstName: core.firstName,
               lastName: core.lastName,
               company: core.company,
+              nickname: core.nickname,
               addressLines: core.addressLines,
               birthYear: core.birthYear,
               birthMonth: core.birthMonth,
@@ -710,6 +717,7 @@ export async function pullBackFromGoogle(
           firstName: p.names?.[0]?.givenName ?? null,
           lastName: p.names?.[0]?.familyName ?? null,
           company: p.organizations?.[0]?.name ?? null,
+          nickname: p.nicknames?.[0]?.value ?? null,
           addressLines: (p.addresses ?? []).map((a) => a.formattedValue ?? "").filter(Boolean),
           birthYear: p.birthdays?.[0]?.date?.year ?? null,
           birthMonth: p.birthdays?.[0]?.date?.month ?? null,

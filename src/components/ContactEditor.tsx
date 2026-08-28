@@ -25,6 +25,7 @@ export interface Contact {
   displayName: string;
   firstName: string | null;
   firstNameVocative: string | null;
+  nickname?: string | null;
   greetingOverride: string | null;
   lastName: string | null;
   note: string | null;
@@ -59,6 +60,7 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
   const [firstNameVocative, setFirstNameVocative] = useState(contact?.firstNameVocative ?? "");
   const [greetingOverride, setGreetingOverride] = useState(contact?.greetingOverride ?? "");
   const [lastName, setLastName] = useState(contact?.lastName ?? "");
+  const [nickname, setNickname] = useState(contact?.nickname ?? "");
   const [note, setNote] = useState(contact?.note ?? "");
   const [isVip, setIsVip] = useState(contact?.isVip ?? false);
   const [isTeam, setIsTeam] = useState(contact?.isTeam ?? false);
@@ -110,6 +112,7 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
       firstNameVocative: firstNameVocative.trim() || null,
       greetingOverride: greetingOverride.trim() || null,
       lastName: lastName.trim() || null,
+      nickname: nickname.trim() || null,
       note: note.trim() || null,
       isVip,
       isTeam,
@@ -208,6 +211,11 @@ export function ContactEditor({ contact, onClose }: EditorProps) {
             <div>
               <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Příjmení</label>
               <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+            <div className="col-span-2">
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Přezdívka</label>
+              <Input value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="Jak mu/jí říkáš" />
+              <p className="text-[11px] text-muted-foreground mt-1">Propíše se do iCloudu i Googlu (vCard NICKNAME).</p>
             </div>
           </div>
           </EditorSection>

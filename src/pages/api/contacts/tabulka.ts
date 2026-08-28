@@ -83,6 +83,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
       displayName: c.displayName,
       firstName: c.firstName,
       lastName: c.lastName,
+      nickname: c.nickname,
       company: c.company,
       note: c.note,
       groups: c.groups,
@@ -124,7 +125,7 @@ export const GET: APIRoute = async ({ cookies, url }) => {
 const Change = z.object({
   id: z.string().min(1),
   field: z.enum([
-    "displayName", "firstName", "lastName", "company", "note",
+    "displayName", "firstName", "lastName", "nickname", "company", "note",
     "birthYear", "birthMonth", "birthDay",
     "phone1", "phone2", "phone3",       // 3 sloty
     "email1", "email2",                  // 2 sloty
@@ -178,6 +179,7 @@ export const PATCH: APIRoute = async ({ cookies, request }) => {
           case "displayName":
           case "firstName":
           case "lastName":
+          case "nickname":
           case "company":
           case "note":
             updateData[c.field] = typeof c.value === "string" ? (c.value.trim() || null) : null;

@@ -484,6 +484,8 @@ model Contact {
   // celým tímhle stringem. Necháme styl Petrovi — žádné formátování server-side.
   greetingOverride  String?
   lastName     String?
+  // Gideon 2026-09-01: přezdívka — vCard NICKNAME, syncuje se s iCloud i Google
+  nickname     String?
   note         String?
   isVip        Boolean        @default(false)
 
