@@ -11,6 +11,8 @@ const SaveBody = z.object({
   accountSid: z.string().min(10).max(100),
   authToken: z.string().min(10).max(200), // optional new token; pokud prázdné, zachovat staré
   fromNumber: z.string().min(8).max(30), // E.164 nebo "whatsapp:+..."
+  // Gideon 2026-09-02: WhatsApp Content Template SID (HX…) — notifikace mimo 24h okno
+  contentSid: z.string().max(60).optional().nullable(),
   whatsappNumber: z.string().min(8).max(30), // Petrovo target číslo
 });
 
@@ -33,12 +35,13 @@ export const GET: APIRoute = async ({ cookies }) => {
     }),
   ]);
 
-  const cfg = (integration?.config ?? {}) as { accountSid?: string; fromNumber?: string };
+  const cfg = (integration?.config ?? {}) as { accountSid?: string; fromNumber?: string; contentSid?: string };
 
   return Response.json({
     configured: Boolean(integration && cfg.accountSid && cfg.fromNumber),
     accountSid: cfg.accountSid ?? "",
     fromNumber: cfg.fromNumber ?? "",
+    contentSid: cfg.contentSid ?? "",
     whatsappNumber: user?.whatsappNumber ?? "",
     lastUsedAt: integration?.lastUsedAt,
     lastError: integration?.lastError,
@@ -66,7 +69,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       tokenEnc: enc.enc,
       tokenIv: enc.iv,
       tokenTag: enc.tag,
-      config: { accountSid: body.accountSid, fromNumber: body.fromNumber },
+      config: { accountSid: body.accountSid, fromNumber: body.fromNumber, contentSid: body.contentSid?.trim() || null },
       lastError: null,
     },
     create: {
@@ -75,7 +78,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       tokenEnc: enc.enc,
       tokenIv: enc.iv,
       tokenTag: enc.tag,
-      config: { accountSid: body.accountSid, fromNumber: body.fromNumber },
+      config: { accountSid: body.accountSid, fromNumber: body.fromNumber, contentSid: body.contentSid?.trim() || null },
     },
   });
 

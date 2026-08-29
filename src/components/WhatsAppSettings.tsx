@@ -7,6 +7,7 @@ interface State {
   configured: boolean;
   accountSid: string;
   fromNumber: string;
+  contentSid: string;
   whatsappNumber: string;
   lastUsedAt: string | null;
   lastError: string | null;
@@ -19,6 +20,7 @@ export default function WhatsAppSettings() {
   const [accountSid, setAccountSid] = useState("");
   const [authToken, setAuthToken] = useState("");
   const [fromNumber, setFromNumber] = useState("");
+  const [contentSid, setContentSid] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
 
   const [saving, setSaving] = useState(false);
@@ -35,6 +37,7 @@ export default function WhatsAppSettings() {
         setState(data);
         setAccountSid(data.accountSid ?? "");
         setFromNumber(data.fromNumber ?? "");
+        setContentSid(data.contentSid ?? "");
         setWhatsappNumber(data.whatsappNumber ?? "");
       }
     } finally {
@@ -65,6 +68,7 @@ export default function WhatsAppSettings() {
           // jednodušší: token je vyžadován při každém uložení.
           authToken: authToken.trim(),
           fromNumber: fromNumber.trim(),
+          contentSid: contentSid.trim() || null,
           whatsappNumber: whatsappNumber.trim(),
         }),
       });
@@ -183,7 +187,7 @@ export default function WhatsAppSettings() {
 
         <div>
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-            From number (Twilio sandbox WA)
+            From number (sandbox nebo vlastní WA Business číslo)
           </label>
           <Input
             value={fromNumber}
@@ -191,6 +195,23 @@ export default function WhatsAppSettings() {
             placeholder="+14155238886"
             className="font-mono text-sm"
           />
+        </div>
+
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+            Content SID šablony (volitelně, HX…)
+          </label>
+          <Input
+            value={contentSid}
+            onChange={(e) => setContentSid(e.target.value)}
+            placeholder="HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            className="font-mono text-sm"
+          />
+          <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+            Schválená WhatsApp šablona (Twilio → Content Template Builder). Bez ní
+            zprávy projdou jen do 24 h od tvé poslední zprávy odesílacímu číslu
+            (error 63016). Se šablonou chodí notifikace kdykoli.
+          </p>
         </div>
 
         <div className="pt-3 border-t border-white/5">

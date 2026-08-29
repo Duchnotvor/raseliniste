@@ -3,8 +3,12 @@
  *
  * Credentials uloženy v `UserIntegration(provider="twilio")` šifrovaně:
  *   tokenEnc/tokenIv/tokenTag = AUTH_TOKEN
- *   config = { accountSid: string, fromNumber: string }
+ *   config = { accountSid: string, fromNumber: string, contentSid?: string }
  *     - fromNumber: "whatsapp:+14155238886" (sandbox) nebo vlastní WA Business
+ *     - contentSid: HX… — schválená WhatsApp šablona (Content Template).
+ *       Gideon 2026-09-02: bez šablony jde zpráva doručit jen do 24 h od
+ *       poslední zprávy OD uživatele (error 63016 Outside messaging window).
+ *       Se šablonou "Rašeliniště: {{1}}" chodí notifikace kdykoli.
  *
  * User.whatsappNumber = target (Petrovo číslo v E.164, např. "+420777111222")
  *
@@ -52,7 +56,7 @@ export async function sendWhatsApp(userId: string, msg: WhatsAppMessage): Promis
     return { ok: false, error: `Nelze rozšifrovat Twilio token: ${e instanceof Error ? e.message : String(e)}` };
   }
 
-  const cfg = (integration.config ?? {}) as { accountSid?: string; fromNumber?: string };
+  const cfg = (integration.config ?? {}) as { accountSid?: string; fromNumber?: string; contentSid?: string };
   if (!cfg.accountSid || !cfg.fromNumber) {
     return { ok: false, error: "Twilio config chybí accountSid nebo fromNumber." };
   }
@@ -63,11 +67,22 @@ export async function sendWhatsApp(userId: string, msg: WhatsAppMessage): Promis
 
   try {
     const client = twilio(cfg.accountSid, token);
-    const result = await client.messages.create({
-      from: fromNumber,
-      to: toNumber,
-      body: msg.body.slice(0, 1500), // safety pod WA limit 1600
-    });
+    // Se schválenou šablonou (contentSid) projde zpráva kdykoli; bez ní jen
+    // v 24h okně od poslední zprávy od uživatele (63016).
+    const result = await client.messages.create(
+      cfg.contentSid
+        ? {
+            from: fromNumber,
+            to: toNumber,
+            contentSid: cfg.contentSid,
+            contentVariables: JSON.stringify({ "1": msg.body.slice(0, 1000) }),
+          }
+        : {
+            from: fromNumber,
+            to: toNumber,
+            body: msg.body.slice(0, 1500), // safety pod WA limit 1600
+          },
+    );
 
     await prisma.userIntegration.update({
       where: { id: integration.id },
