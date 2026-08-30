@@ -43,8 +43,12 @@ export default function PlaudIntegration() {
     finally { setSaving(false); }
   }
 
+  // Gideon 2026-09-03: window.confirm v PWA (standalone) nefunguje — tlačítko
+  // pak „nic nedělá". Potvrzení dvouklikem přímo v UI.
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   async function disconnect() {
-    if (!confirm("Odpojit Plaud? Stažené zápisy zůstanou, jen se přestanou stahovat nové.")) return;
+    if (!confirmDisconnect) { setConfirmDisconnect(true); setTimeout(() => setConfirmDisconnect(false), 4000); return; }
+    setConfirmDisconnect(false);
     await fetch("/api/settings/plaud", { method: "DELETE" }).catch(() => null);
     await load();
   }
@@ -111,7 +115,7 @@ export default function PlaudIntegration() {
       {status.connected && (
         <div className="pt-2 border-t border-border">
           <Button onClick={() => void disconnect()} variant="ghost" size="sm" className="text-muted-foreground">
-            <Trash2 className="size-4" /> Odpojit Plaud
+            <Trash2 className="size-4" /> {confirmDisconnect ? "Opravdu odpojit? (klikni znovu)" : "Odpojit Plaud"}
           </Button>
         </div>
       )}
