@@ -41,7 +41,11 @@ export interface EvaluateInput {
   // Gideon 2026-08-10: per-invite výjimka — SO/NE se nepovažuje za zakázaný
   // den (day-restriction + availability pravidla víkend pustí, hodiny dle typu)
   allowWeekend?: boolean;
+  // Gideon 2026-08-30: per-invite výjimka — okno dne se prodlouží do 23:00
+  allowEvening?: boolean;
 }
+
+const EVENING_END_MIN = 23 * 60; // 23:00
 
 /** SO (6) / NE (0) povolené jen s per-invite výjimkou allowWeekend. */
 function isWeekendDow(dow: number): boolean {
@@ -292,7 +296,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     const startMin = minutesOfDay(input.startsAt);
     const endMin = minutesOfDay(input.endsAt);
     const winStart = hhmmToMin(cfg.onlineHours.start);
-    const winEnd = hhmmToMin(cfg.onlineHours.end);
+    const winEnd = input.allowEvening ? Math.max(hhmmToMin(cfg.onlineHours.end), EVENING_END_MIN) : hhmmToMin(cfg.onlineHours.end);
     if (startMin < winStart || endMin > winEnd) {
       signals.push({
         rule: "HARD_ONLINE_HOURS",
@@ -411,9 +415,9 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     });
   }
 
-  // END_OF_DAY: po 18:00
+  // END_OF_DAY: po 18:00 — s výjimkou allowEvening (Gideon večer vědomě povolil)
   const eod = hhmmToMin(cfg.endOfDay);
-  if (minutesOfDay(input.startsAt) >= eod) {
+  if (!input.allowEvening && minutesOfDay(input.startsAt) >= eod) {
     signals.push({
       rule: "END_OF_DAY",
       severity: "WARNING",
@@ -461,7 +465,7 @@ export async function evaluateSlot(input: EvaluateInput): Promise<EvaluationResu
     }
 
     // OUTSIDE_AVAILABILITY: zkontroluj že je v okně dle typu
-    if (!isWithinAvailability(input.type, input.startsAt, input.endsAt, cfg, input.allowWeekend)) {
+    if (!isWithinAvailability(input.type, input.startsAt, input.endsAt, cfg, input.allowWeekend, input.allowEvening)) {
       signals.push({
         rule: "OUTSIDE_AVAILABILITY",
         severity: "ERROR",
@@ -505,6 +509,8 @@ export interface AvailabilityOpts {
   earliestSlotStart?: Date;
   /** Gideon 2026-08-10: výjimečné povolení SO/NE slotů (hodiny dle typu). */
   allowWeekend?: boolean;
+  /** Gideon 2026-08-30: výjimečné povolení večerních slotů do 23:00. */
+  allowEvening?: boolean;
 }
 
 export interface Slot {
@@ -540,7 +546,7 @@ export async function listAvailableSlots(opts: AvailabilityOpts): Promise<Slot[]
 
       // Generuj hodinové sloty v rámci okna
       const winStart = timeOnDate(day, dayConfig.start);
-      const winEnd = timeOnDate(day, dayConfig.end);
+      const winEnd = opts.allowEvening ? timeOnDate(day, "23:00") : timeOnDate(day, dayConfig.end);
       for (let s = new Date(winStart); s.getTime() + dur <= winEnd.getTime(); s = new Date(s.getTime() + dur)) {
         const e = new Date(s.getTime() + dur);
         if (s < earliest) continue;
@@ -552,6 +558,7 @@ export async function listAvailableSlots(opts: AvailabilityOpts): Promise<Slot[]
           endsAt: e,
           bookingMode: opts.bookingMode,
           allowWeekend: opts.allowWeekend,
+          allowEvening: opts.allowEvening,
         });
 
         // Pro booking nabídneme jen GREEN.
@@ -636,6 +643,7 @@ function isWithinAvailability(
   endsAt: Date,
   cfg: SchedulingConfig,
   allowWeekend?: boolean,
+  allowEvening?: boolean,
 ): boolean {
   const a = availabilityForType(t, cfg);
   if (!a) return true; // pro typy bez definice (PERSONAL, OTHER, …) neblokujeme
@@ -643,5 +651,6 @@ function isWithinAvailability(
   if (!a.days.includes(dow) && !(allowWeekend && isWeekendDow(dow))) return false;
   const startMin = minutesOfDay(startsAt);
   const endMin = minutesOfDay(endsAt);
-  return startMin >= hhmmToMin(a.start) && endMin <= hhmmToMin(a.end);
+  const windowEnd = allowEvening ? Math.max(hhmmToMin(a.end), EVENING_END_MIN) : hhmmToMin(a.end);
+  return startMin >= hhmmToMin(a.start) && endMin <= windowEnd;
 }

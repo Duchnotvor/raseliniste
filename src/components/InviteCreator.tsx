@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type React from "react";
 import {
   Send, Copy, Check, Loader2, AlertTriangle, User, Globe, Trash2, ExternalLink, Mail,
 } from "lucide-react";
@@ -23,6 +24,7 @@ interface InviteRow {
   validUntil: string;
   availableFrom: string | null;
   allowWeekend: boolean;
+  allowEvening: boolean;
   meetSource: string | null;
   publicNote: string | null;
   internalNote: string | null;
@@ -40,6 +42,7 @@ interface EditForm {
   slotDurationMin: string;
   availableFrom: string; // YYYY-MM-DD | ""
   allowWeekend: boolean;
+  allowEvening: boolean;
   meetSource: string;    // "" = auto | CONTACT | COMPANY
   validUntil: string;    // YYYY-MM-DD
   publicNote: string;
@@ -76,6 +79,8 @@ export default function InviteCreator() {
   const [availableFrom, setAvailableFrom] = useState("");
   // Gideon 2026-08-10: výjimečné povolení víkendu pro tuhle pozvánku
   const [allowWeekend, setAllowWeekend] = useState(false);
+  // Gideon 2026-08-30 (anotace): výjimečné povolení večera do 23:00
+  const [allowEvening, setAllowEvening] = useState(false);
   // Gideon 2026-08-24: čí Meet u online schůzky — auto / kontaktu / firemní
   const [meetSource, setMeetSource] = useState("");
   const [meetOptions, setMeetOptions] = useState<{ contactMeetLink: string | null; company: string | null; companyMeetLink: string | null } | null>(null);
@@ -197,6 +202,7 @@ export default function InviteCreator() {
       slotDurationMin: String(inv.slotDurationMin),
       availableFrom: inv.availableFrom ? inv.availableFrom.slice(0, 10) : "",
       allowWeekend: inv.allowWeekend ?? false,
+      allowEvening: inv.allowEvening ?? false,
       meetSource: inv.meetSource ?? "",
       validUntil: inv.validUntil ? inv.validUntil.slice(0, 10) : "",
       publicNote: inv.publicNote ?? "",
@@ -218,6 +224,7 @@ export default function InviteCreator() {
           slotDurationMin: parseInt(editForm.slotDurationMin),
           availableFrom: editForm.availableFrom || null,
           allowWeekend: editForm.allowWeekend,
+          allowEvening: editForm.allowEvening,
           meetSource: editForm.meetSource || null,
           validUntil: editForm.validUntil || undefined,
           publicNote: editForm.publicNote || null,
@@ -286,6 +293,7 @@ export default function InviteCreator() {
           internalNote: internalNote.trim() || undefined,
           availableFrom: availableFrom.trim() || undefined,
           allowWeekend: allowWeekend || undefined,
+          allowEvening: allowEvening || undefined,
           meetSource: meetSource || undefined,
           publicNote: publicNote.trim() || undefined,
           contactEmail: !universal && selectedNeedsEmail && newEmail.trim() ? newEmail.trim() : undefined,
@@ -411,6 +419,7 @@ export default function InviteCreator() {
       <div className="glass rounded-xl p-5 space-y-4" style={{ ["--c" as string]: "var(--tint-sky)" }}>
         <h2 className="font-serif text-lg">Nová pozvánka</h2>
 
+        <FormSection title="Komu" tint="sky">
         {/* Personalizovaný vs univerzální */}
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -484,7 +493,9 @@ export default function InviteCreator() {
             )}
           </div>
         )}
+        </FormSection>
 
+        <FormSection title="Schůzka" tint="peach">
         {fixedMode && !universal && (
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -570,8 +581,10 @@ export default function InviteCreator() {
             </select>
           </div>}
         </div>
+        </FormSection>
 
-        {!(fixedMode && !universal) && <div>
+        {!(fixedMode && !universal) && <FormSection title="Termíny — výjimky" tint="butter">
+        <div>
           <label className="text-xs font-mono uppercase text-muted-foreground">
             Sloty dostupné od (volitelně)
           </label>
@@ -585,9 +598,9 @@ export default function InviteCreator() {
             Host nedostane sloty před tímto datem. Prázdné = jen globální lead time
             ({mode === "CLIENT" ? "72 h klient" : "24 h přítel"}).
           </p>
-        </div>}
+        </div>
 
-        {!(fixedMode && !universal) && <label className="flex items-start gap-2 cursor-pointer">
+        <label className="flex items-start gap-2 cursor-pointer">
           <input
             type="checkbox"
             checked={allowWeekend}
@@ -601,14 +614,28 @@ export default function InviteCreator() {
               Platí jen pro tuhle pozvánku.
             </span>
           </span>
-        </label>}
+        </label>
+
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allowEvening}
+            onChange={(e) => setAllowEvening(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm">
+            Výjimečně povolit i večer (do 23:00)
+            <span className="block text-xs text-muted-foreground">
+              Sloty se nabídnou i po běžném konci dne, až do 23:00. Platí jen pro tuhle pozvánku.
+            </span>
+          </span>
+        </label>
+        </FormSection>}
 
         {/* Gideon 2026-08-24: čí Meet použít u online schůzky */}
         {(fixedMode ? fixedType === "MEETING_ONLINE" : onlineCapable) && meetOptions && (meetOptions.contactMeetLink || meetOptions.companyMeetLink) && (
+          <FormSection title="Meet místnost" tint="mint">
           <div>
-            <label className="text-xs font-mono uppercase text-muted-foreground block mb-1">
-              Meet místnost (online schůzka)
-            </label>
             <div className="space-y-1.5">
               <label className="flex items-start gap-2 cursor-pointer text-sm">
                 <input type="radio" name="meetSource" checked={meetSource === ""} onChange={() => setMeetSource("")} className="mt-1" />
@@ -632,8 +659,10 @@ export default function InviteCreator() {
               )}
             </div>
           </div>
+          </FormSection>
         )}
 
+        <FormSection title="Poznámky" tint="lavender">
         <div>
           <label className="text-xs font-mono uppercase text-muted-foreground">
             Poznámka pro hosta (volitelně)
@@ -654,6 +683,7 @@ export default function InviteCreator() {
           <label className="text-xs font-mono uppercase text-muted-foreground">Interní poznámka (volitelně, jen pro tebe)</label>
           <Input value={internalNote} onChange={(e) => setInternalNote(e.target.value)} placeholder="O čem to bude…" />
         </div>
+        </FormSection>
 
         <Button
           onClick={fixedMode && !universal ? createDirect : create}
@@ -938,6 +968,14 @@ export default function InviteCreator() {
                         />
                         Výjimečně povolit i víkend
                       </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editForm.allowEvening}
+                          onChange={(e) => setEditForm((f) => f && ({ ...f, allowEvening: e.target.checked }))}
+                        />
+                        Výjimečně povolit i večer (do 23:00)
+                      </label>
                       <div>
                         <label className="text-[10px] font-mono uppercase text-muted-foreground">Meet místnost (online)</label>
                         <select
@@ -1033,4 +1071,20 @@ function meetingTypeLabel(t: string): string {
     case "CHOICE_ANY": return "libovolně";
     default: return t;
   }
+}
+
+
+function FormSection({ title, tint, children }: { title: string; tint: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="rounded-lg p-3.5 space-y-3"
+      style={{
+        background: `color-mix(in oklch, var(--tint-${tint}) 5%, transparent)`,
+        border: `1px solid color-mix(in oklch, var(--tint-${tint}) 22%, transparent)`,
+      }}
+    >
+      <div className="text-[10px] uppercase tracking-widest font-mono text-muted-foreground">{title}</div>
+      {children}
+    </div>
+  );
 }

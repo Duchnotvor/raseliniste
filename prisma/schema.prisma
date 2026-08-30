@@ -1421,6 +1421,10 @@ model BookingInvite {
   // sloty (online i prezenční) se nabízejí i v SO/NE, v hodinách dle typu.
   allowWeekend    Boolean             @default(false)
 
+  // Gideon 2026-08-30 (anotace): výjimečné povolení večera — sloty se
+  // nabízejí až do 23:00 (jinak končí dle SchedulingConfig, typicky 17:00).
+  allowEvening    Boolean             @default(false)
+
   // Gideon 2026-08-24: čí Meet místnost použít u online schůzky.
   // "CONTACT" = trvalý link kontaktu · "COMPANY" = firemní link (dle
   // Contact.company → CompanyMeetLink; bez nahrávání/zápisu — cizí místnost)

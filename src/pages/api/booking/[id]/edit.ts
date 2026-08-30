@@ -19,6 +19,7 @@ const Body = z.object({
   availableFrom: z.string().nullable().optional(),
   // Gideon 2026-08-10: výjimečné povolení víkendových slotů
   allowWeekend: z.boolean().optional(),
+  allowEvening: z.boolean().optional(),
   meetSource: z.enum(["CONTACT", "COMPANY"]).nullable().optional(),
   // YYYY-MM-DD — konec platnosti (uloží se konec dne)
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -62,6 +63,7 @@ export const PATCH: APIRoute = async ({ params, request, cookies }) => {
   }
   if (b.validUntil) data.validUntil = new Date(`${b.validUntil}T23:59:59`);
   if (b.allowWeekend !== undefined) data.allowWeekend = b.allowWeekend;
+  if (b.allowEvening !== undefined) data.allowEvening = b.allowEvening;
   if (b.meetSource !== undefined) data.meetSource = b.meetSource;
   if (b.publicNote !== undefined) data.publicNote = b.publicNote?.trim() || null;
   if (b.internalNote !== undefined) data.internalNote = b.internalNote?.trim() || null;

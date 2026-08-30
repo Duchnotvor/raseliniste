@@ -21,6 +21,7 @@ const schema = z.object({
   availableFrom: z.string().min(1).optional().nullable(),
   // Gideon 2026-08-10: výjimečné povolení víkendových slotů pro tuhle pozvánku
   allowWeekend: z.boolean().optional(),
+  allowEvening: z.boolean().optional(),
   // Gideon 2026-08-24: čí Meet u online schůzky (kontaktní / firemní místnost)
   meetSource: z.enum(["CONTACT", "COMPANY"]).nullable().optional(),
   // Gideon 2026-08-04 („chci aby to fungovalo"): kontakt bez emailu už
