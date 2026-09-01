@@ -4,6 +4,58 @@
 > a ví kde se skončilo. Detail jednotlivých session bloků v
 > `INSTRUKCE/HANDOFF-*.md` a v memory souborech.
 
+## SNAPSHOT 2026-09-01 — pevný bod před UX/flow vlnou
+
+> Gideon: „budeme teď dělat hodně úprav přehlednosti a flow" — tohle je
+> stav, od kterého se vychází.
+
+**Deploy stav:** origin/main + ghcr latest = `3e183c8`; NEPUSHNUTÝ lokální
+commit `6136844` (loop retry + Zahodit potvrzení). Prod NASka: Gideon
+pulloval naposledy ~31. 8. (verze s 0f7b1a5? ověřit při další stížnosti
+přes asset probe).
+
+**Hotovo od 2026-08-09 (vše commitnuté, většina nasazená):**
+- **Plaud → Studánka** (125cf97…3eece65): REST API, tokeny šifrovaně,
+  cron à 30 min, MP3 stahujeme a přepisujeme u nás (Gemini) — Plaud sám
+  nepřepisuje; první sync = backfill 365 d. ⚠️ ČEKÁ NA GIDEONA: prod má
+  mrtvé tokeny z 28. 8. → Odpojit (v prohlížeči, ne PWA — nebo po deployi
+  3e183c8 i v PWA) + vložit čerstvé (živé, ve schránce po `plaud login`).
+- **Booking balík**: allowWeekend (a50e54b) + allowEvening do 23:00
+  (0f7b1a5, přeskočí END_OF_DAY warning) + firemní Meet linky
+  (CompanyMeetLink per Contact.company, meetSource CONTACT/COMPANY,
+  5889ba7) + „Zadat termín napevno" (directBook, 1c674e1) + „Poslat
+  pozvánku" mailem s náhledem / SMS (send-invite endpoint) + archiv
+  proběhlých (c4d22e4) + formulář v tónovaných sekcích
+  Komu/Schůzka/Termíny/Meet/Poznámky (0f7b1a5).
+- **Rituály** (c18c5da): vše CustomRitual řádky, editovatelné časy/dny/
+  obsah/upozornění, propis do Google (RRULE); sync-calendars instance
+  přeskakuje.
+- **Kontakty**: přezdívka (nickname, c49c8e2) — tabulka i editor, sync
+  iCloud (vCard NICKNAME) + Google (nicknames).
+- **WhatsApp/Twilio**: vlastní sender „Gide-On" +420735920798 Online;
+  Content Template podpora (f4a2862, pole Content SID v /settings/whatsapp).
+  ⚠️ ČEKÁ: Meta schvaluje šablonu raseliniste_pripominka (první
+  raseliniste_notifikace zamítnuta — moc otevřená); po Approved vložit HX….
+- **Úkoly audio** (6136844): hallucination-loop retry (2. pokus temp 0.5),
+  Zahodit s dvouklik potvrzením (confirm() v PWA nefunguje!). INCIDENT
+  2026-08-31: Gideon přišel o hodinovou nahrávku (loop → error → Zahodit
+  smazal audio bez ptaní).
+
+**Otevřené (checklist):**
+1. Gideon: push 6136844 → zelená → NAS Pull + Recreate
+2. Gideon: Plaud — Odpojit + vložit čerstvé tokeny → první sync 17 nahrávek
+3. Gideon: WhatsApp — po schválení šablony vložit Content SID
+4. Ověřit: pětiúkolová nahrávka z 1. 9. (v review na /ukoly?)
+5. Anotace (bublina Poznámka) — nástroj aktivní, oba komenty z 30. 8.
+   odbavené (sekce formuláře + večerní výjimka)
+
+**Známé pasti pro UX vlnu:** window.confirm/alert v PWA nefunguje (vždy
+dvouklik v UI); Portal pattern pro dropdowny v .glass; non-SOFT WARNING
+v rules vyřazuje sloty z nabídky; brand pravidla STRICT
+(feedback_brand_palette_rules.md); po prisma generate restart dev serveru;
+dev server na portu 4322 (3000 kolize), spouštět se `set -a; source
+.env.local` když přes Bash.
+
 ## Session 2026-08-07 — cache fix, UX kolo, Meet zprovozňování
 
 **INCIDENT (zapsán i v memory):** „nevidím novou verzi" po deployi NIKDY
