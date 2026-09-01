@@ -387,7 +387,15 @@ export default function TaskAudioReview({ batchId }: { batchId: string }) {
     }
   }
 
+  // Gideon 2026-09-01: Zahodit maže i audio — jeden klik bez potvrzení stál
+  // Gideona hodinovou nahrávku (window.confirm v PWA nefunguje → dvouklik v UI).
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   async function discard() {
+    if (!confirmDiscard) { setConfirmDiscard(true); setTimeout(() => setConfirmDiscard(false), 4000); return; }
+    setConfirmDiscard(false);
+    return discardNow();
+  }
+  async function discardNow() {
     if (!confirm("Opravdu zahodit všechny návrhy?")) return;
     const res = await fetch(`/api/ukoly/audio/${batchId}/discard`, { method: "POST" });
     if (res.ok) window.location.href = "/ukoly";
@@ -484,7 +492,7 @@ export default function TaskAudioReview({ batchId }: { batchId: string }) {
             <Button variant="outline" onClick={() => regenerate("full")}>
               <RotateCw /> Zkusit od začátku
             </Button>
-            <Button variant="ghost" onClick={discard}><Trash2 /> Zahodit</Button>
+            <Button variant="ghost" onClick={discard}><Trash2 /> {confirmDiscard ? "Opravdu? Smaže i audio (klikni znovu)" : "Zahodit"}</Button>
           </div>
           {batch.rawTranscript && (
             <details className="mt-4 text-sm">
@@ -631,7 +639,7 @@ export default function TaskAudioReview({ batchId }: { batchId: string }) {
         >
           {committing ? <><Loader2 className="animate-spin" /> Vytvářím…</> : <><Check /> Vytvořit zaškrtnuté</>}
         </Button>
-        <Button variant="ghost" onClick={discard}><Trash2 /> Zahodit vše</Button>
+        <Button variant="ghost" onClick={discard}><Trash2 /> {confirmDiscard ? "Opravdu? Smaže i audio (klikni znovu)" : "Zahodit vše"}</Button>
       </div>
     </div>
   );

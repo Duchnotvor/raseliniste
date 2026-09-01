@@ -436,7 +436,10 @@ DOPLŇUJÍCÍ PRAVIDLO PRO TENTO PŘEPIS:
     : `${baseTranscribePrompt}${accuracyRules}`;
 
   const stage1Start = Date.now();
-  const transcribeResp = await withRetry("Stage 1 (transcribe)", async () => {
+  // Gideon 2026-09-01: hallucination loop je NÁHODNÁ vada Flash (stejné audio
+  // podruhé projde) — proto při detekci loopu jeden retry s vyšší teplotou,
+  // místo okamžitého erroru. Gideon kvůli tomu přišel o hodinovou nahrávku.
+  const runStage1 = (temperature: number) => withRetry("Stage 1 (transcribe)", async () => {
     try {
       return await genai.models.generateContent({
         model: DEFAULT_MODEL, // Flash je na přepis dostatečný i pro briefy (analýza je pak Pro)
@@ -447,7 +450,7 @@ DOPLŇUJÍCÍ PRAVIDLO PRO TENTO PŘEPIS:
           },
         ],
         config: {
-          temperature: 0.1,
+          temperature,
           maxOutputTokens: 65000, // pro 90 min audio reálně potřeba
         },
       });
@@ -469,26 +472,34 @@ DOPLŇUJÍCÍ PRAVIDLO PRO TENTO PŘEPIS:
       throw e;
     }
   });
-  void trackGeminiCall({
-    module: "audio-stage1-transcribe",
-    response: transcribeResp,
-    modelName: DEFAULT_MODEL,
-    durationMs: Date.now() - stage1Start,
-  });
 
-  const transcript = (transcribeResp.text ?? "").trim();
-  if (!transcript) {
-    throw new Error(diagnoseEmptyResponse(transcribeResp, params.audio.byteLength, params.mimeType, `mode ${usedMode}`));
+  let transcript = "";
+  let loopReason: string | null = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const transcribeResp = await runStage1(attempt === 1 ? 0.1 : 0.5);
+    void trackGeminiCall({
+      module: "audio-stage1-transcribe",
+      response: transcribeResp,
+      modelName: DEFAULT_MODEL,
+      durationMs: Date.now() - stage1Start,
+    });
+
+    transcript = (transcribeResp.text ?? "").trim();
+    if (!transcript) {
+      throw new Error(diagnoseEmptyResponse(transcribeResp, params.audio.byteLength, params.mimeType, `mode ${usedMode}`));
+    }
+
+    // Detekce hallucination loopu — Gemini 2.5 Flash při tichém/nečitelném audiu
+    // občas spadne do smyčky a opakuje krátkou frázi stovkykrát do token limitu.
+    loopReason = detectHallucinationLoop(transcript);
+    if (!loopReason) break;
+    console.warn(`[audio-transcribe] hallucination loop (pokus ${attempt}/2): ${loopReason} — ${attempt === 1 ? "zkouším znovu s vyšší teplotou" : "vzdávám"}`);
   }
-
-  // Detekce hallucination loopu — Gemini 2.5 Flash při tichém/nečitelném audiu
-  // občas spadne do smyčky a opakuje krátkou frázi (např. „že se to stalo")
-  // stovkykrát až do token limitu. Místo uložení blábolu raději error.
-  const loopReason = detectHallucinationLoop(transcript);
   if (loopReason) {
     throw new Error(
-      `Gemini transcription vrátila opakující se loop (${loopReason}). ` +
-      `Pravděpodobně tiché/nečitelné audio. Audio: ${(params.audio.byteLength / 1024 / 1024).toFixed(1)} MB, mime ${params.mimeType}.`,
+      `Gemini transcription vrátila opakující se loop i po 2 pokusech (${loopReason}). ` +
+      `Pravděpodobně tiché/nečitelné audio. Audio: ${(params.audio.byteLength / 1024 / 1024).toFixed(1)} MB, mime ${params.mimeType}. ` +
+      `Audio je uložené — tlačítko „Zkusit od začátku" to zkusí znovu.`,
     );
   }
 
