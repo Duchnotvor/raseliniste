@@ -166,7 +166,27 @@ export async function healMeetSpaces(userId: string, token: string): Promise<voi
   const spaces = await prisma.meetSpace.findMany({ where: { userId } });
   for (const s of spaces) {
     try {
-      const url = `${MEET_API}/spaces/${encodeURIComponent(s.meetingCode)}?updateMask=config.artifactConfig.recordingConfig.autoRecordingGeneration`;
+      // FIX 2026-09-04 (Gideon: „od 25. 8. nespouštíš nahrávání"): spaces.patch
+      // NEPŘIJÍMÁ meeting code v cestě — jen skutečné resource name
+      // "spaces/<id>" (kód umí jen spaces.get). Patch přes kód → 403
+      // „Permission denied on resource Space (or it may not exist)" a heal
+      // tiše selhával u všech místností přidaných kódem. Nejdřív GET (kód
+      // je OK) → resource name → teprve PATCH.
+      let resourceName = s.spaceName;
+      if (!resourceName || !resourceName.startsWith("spaces/") || resourceName === `spaces/${s.meetingCode}`) {
+        const getRes = await fetch(`${MEET_API}/spaces/${encodeURIComponent(s.meetingCode)}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!getRes.ok) {
+          const body = await getRes.text().catch(() => "");
+          throw new Error(`spaces.get ${getRes.status}: ${body.slice(0, 250)}`);
+        }
+        const got = await getRes.json() as { name?: string };
+        if (!got.name) throw new Error("spaces.get nevrátil resource name.");
+        resourceName = got.name;
+      }
+
+      const url = `${MEET_API}/${resourceName}?updateMask=config.artifactConfig.recordingConfig.autoRecordingGeneration`;
       const res = await fetch(url, {
         method: "PATCH",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
