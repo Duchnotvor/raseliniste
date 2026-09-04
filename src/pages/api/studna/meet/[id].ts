@@ -38,3 +38,13 @@ export const DELETE: APIRoute = async ({ params, cookies }) => {
   if (r.count === 0) return Response.json({ error: "Zápis nenalezen." }, { status: 404 });
   return Response.json({ ok: true });
 };
+
+/** PATCH /api/studna/meet/:id — „Přepsat znovu" (Gideon 2026-09-01, mizerné přepisy). */
+export const PATCH: APIRoute = async ({ params, cookies }) => {
+  const session = await readSession(cookies);
+  if (!session) return Response.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+  const { retranscribeMeetNote } = await import("@/lib/meet-sync");
+  const r = await retranscribeMeetNote(session.uid, params.id!);
+  if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
+  return Response.json({ ok: true });
+};

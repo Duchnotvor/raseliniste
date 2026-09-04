@@ -690,6 +690,8 @@ export async function transcribeAudioOnly(params: {
   mimeType: string;
   /** Volitelný kontext projektu — Gemini ho použije pro lepší rozpoznání jmen/termínů. */
   projectContext?: string | null;
+  /** Model přepisu — default Flash; Meet schůzky posílají Pro (Gideon 2026-09-01: Flash na hodinovou schůzku více lidí nestačí). */
+  model?: string;
 }): Promise<{ transcript: string; model: string }> {
   assertAudioNotEmpty(params.audio, params.mimeType);
   const fitsInline = params.audio.byteLength <= INLINE_AUDIO_LIMIT_BYTES;
@@ -750,12 +752,13 @@ PRAVIDLA:
 ${params.projectContext ? `Kontext projektu (pro lepší rozpoznání jmen/termínů): ${params.projectContext}\n` : ""}`;
 
   const start = Date.now();
-  const resp = await withRetry("UPLOAD transcribe", async () => {
+  const usedModel = params.model?.trim() || DEFAULT_MODEL;
+  const runOnce = (temperature: number) => withRetry("UPLOAD transcribe", async () => {
     try {
       return await genai.models.generateContent({
-        model: DEFAULT_MODEL,
+        model: usedModel,
         contents: [{ role: "user", parts: [audioPart as never, { text: prompt }] }],
-        config: { temperature: 0.1, maxOutputTokens: 65000 },
+        config: { temperature, maxOutputTokens: 65000 },
       });
     } catch (e) {
       // Petr 2026-05-14: Gemini 400 INVALID_ARGUMENT pro Studanka UPLOAD
@@ -772,19 +775,33 @@ ${params.projectContext ? `Kontext projektu (pro lepší rozpoznání jmen/term�
       throw e;
     }
   });
-  void trackGeminiCall({
-    module: "audio-upload-transcribe",
-    response: resp,
-    modelName: DEFAULT_MODEL,
-    durationMs: Date.now() - start,
-  });
 
-  const transcript = (resp.text ?? "").trim();
-  if (!transcript) {
-    throw new Error(diagnoseEmptyResponse(resp, params.audio.byteLength, params.mimeType, "UPLOAD"));
+  // Loop-guard i tady (Gideon 2026-09-01: Meet zápisy „totálně nahovno" —
+  // stejná hallucination smyčka jako u úkolů, jen bez detekce). 2. pokus
+  // s vyšší teplotou, pak error.
+  let transcript = "";
+  let loopReason: string | null = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const resp = await runOnce(attempt === 1 ? 0.1 : 0.5);
+    void trackGeminiCall({
+      module: "audio-upload-transcribe",
+      response: resp,
+      modelName: usedModel,
+      durationMs: Date.now() - start,
+    });
+    transcript = (resp.text ?? "").trim();
+    if (!transcript) {
+      throw new Error(diagnoseEmptyResponse(resp, params.audio.byteLength, params.mimeType, "UPLOAD"));
+    }
+    loopReason = detectHallucinationLoop(transcript);
+    if (!loopReason) break;
+    console.warn(`[audio-upload] hallucination loop (pokus ${attempt}/2, ${usedModel}): ${loopReason}`);
+  }
+  if (loopReason) {
+    throw new Error(`Přepis se zacyklil i po 2 pokusech (${loopReason}) — zkus Přepsat znovu.`);
   }
 
-  return { transcript, model: DEFAULT_MODEL };
+  return { transcript, model: usedModel };
 }
 
 export async function analyzeTranscript(params: {

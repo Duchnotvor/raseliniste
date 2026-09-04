@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, Video, X, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, RotateCw, Video, X, Check } from "lucide-react";
 import { Button } from "./ui/Button";
 
 /**
@@ -133,6 +133,17 @@ export default function MeetInbox() {
   async function removeSpace(id: string) {
     const res = await fetch(`/api/studna/meet/spaces?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok) setSpaces((s) => s.filter((x) => x.id !== id));
+  }
+
+  // Gideon 2026-09-01: mizerný přepis → přepsat znovu (nový model Pro)
+  async function retranscribe(noteId: string) {
+    setError(null);
+    const res = await fetch(`/api/studna/meet/${noteId}`, { method: "PATCH" }).catch(() => null);
+    const d = await res?.json().catch(() => null);
+    if (!res?.ok) { setError(d?.error ?? "Přepsání selhalo."); return; }
+    setMessage("Přepisuje se znovu — hotový zápis se tu za pár minut obnoví sám.");
+    setTimeout(() => setMessage(null), 8000);
+    await load();
   }
 
   async function remove(noteId: string) {
@@ -286,6 +297,11 @@ export default function MeetInbox() {
                       {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   ) : null}
+                  {((n.status === "done" && !n.recordingId) || n.status === "error") && (
+                    <button type="button" onClick={() => void retranscribe(n.id)} title="Přepsat znovu (kvalitnější model) — když je přepis špatný" className="p-1 rounded text-muted-foreground hover:text-foreground">
+                      <RotateCw className="size-3.5" />
+                    </button>
+                  )}
                   <button type="button" onClick={() => void remove(n.id)} title="Zahodit zápis" className="p-1 rounded text-muted-foreground hover:text-foreground">
                     <X className="size-3.5" />
                   </button>

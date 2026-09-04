@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { prisma } from "./db";
 import { getAuthorizedClient } from "./google-oauth";
 import { transcribeAudioOnly } from "./audio-transcribe";
-import { getGemini, DEFAULT_MODEL } from "./gemini";
+import { getGemini, DEFAULT_MODEL, ANALYSIS_MODEL } from "./gemini";
 import { callTracked } from "./gemini-usage";
 
 /**
@@ -323,7 +323,9 @@ async function processMeetNote(userId: string, noteId: string, token: string, dr
 
     // 3) Přepis (Gemini; Files API pro velké soubory)
     const note = await prisma.meetNote.findUnique({ where: { id: noteId }, select: { startedAt: true, endedAt: true, spaceName: true } });
-    const { transcript } = await transcribeAudioOnly({ audio, mimeType: "audio/mpeg" });
+    // Gideon 2026-09-01: „přepis totálně nahovno" — Flash na dlouhou schůzku
+    // více mluvčích nestačí. Schůzky jedou přes Pro (~10-15 Kč / hodinová).
+    const { transcript } = await transcribeAudioOnly({ audio, mimeType: "audio/mpeg", model: ANALYSIS_MODEL });
 
     // 4) Strukturovaný zápis (markdown — dle vzoru z návodu)
     const summaryMd = await buildMeetSummary(transcript);
@@ -367,6 +369,40 @@ async function processMeetNote(userId: string, noteId: string, token: string, dr
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => null);
   }
+}
+
+/**
+ * Ruční „Přepsat znovu" (Gideon 2026-09-01) — pro zápisy s mizerným přepisem.
+ * Jde jen u nepřiřazených (přiřazený už má ProjectRecording ze starého textu)
+ * a pokud Drive nahrávka pořád existuje.
+ */
+export async function retranscribeMeetNote(userId: string, noteId: string): Promise<{ ok: boolean; error?: string }> {
+  const note = await prisma.meetNote.findFirst({ where: { id: noteId, userId, deleted: false } });
+  if (!note) return { ok: false, error: "Zápis nenalezen." };
+  if (note.recordingId) return { ok: false, error: "Zápis je už přiřazený k projektu — přepsat znovu jde jen nepřiřazený." };
+  if (!note.driveFileId) return { ok: false, error: "Chybí odkaz na nahrávku (Drive) — nejde přepsat." };
+  if (inFlight.size > 0 && Array.from(inFlight).some((f) => f.noteId === noteId)) {
+    return { ok: false, error: "Už se zpracovává." };
+  }
+
+  const client = await getAuthorizedClient(userId);
+  const { token } = await client.getAccessToken();
+  if (!token) return { ok: false, error: "Google access token se nepodařilo získat." };
+
+  await prisma.meetNote.update({ where: { id: noteId }, data: { status: "processing", processingError: null } });
+
+  const entry: InFlight = { noteId, startedAt: Date.now(), promise: Promise.resolve() };
+  entry.promise = processMeetNote(userId, noteId, token, note.driveFileId)
+    .catch((e) => {
+      console.error(`[meet-sync] re-transcribe ${noteId} selhalo:`, e instanceof Error ? e.message : e);
+      return prisma.meetNote.update({
+        where: { id: noteId },
+        data: { status: "error", processingError: e instanceof Error ? e.message.slice(0, 500) : String(e) },
+      }).then(() => undefined).catch(() => undefined);
+    })
+    .finally(() => { inFlight.delete(entry); });
+  inFlight.add(entry);
+  return { ok: true };
 }
 
 async function buildMeetSummary(transcript: string): Promise<string> {
