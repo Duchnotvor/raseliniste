@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, RotateCw, Video, X, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Loader2, RefreshCw, RotateCw, Video, X, Check } from "lucide-react";
 import { Button } from "./ui/Button";
 
 /**
@@ -144,6 +144,22 @@ export default function MeetInbox() {
     setMessage("Přepisuje se znovu — hotový zápis se tu za pár minut obnoví sám.");
     setTimeout(() => setMessage(null), 8000);
     await load();
+  }
+
+  // Gideon 2026-09-01: kopírování zápisu/přepisu do schránky
+  const [copied, setCopied] = useState<string | null>(null);
+  async function copyNote(noteId: string, what: "summary" | "transcript") {
+    setError(null);
+    const res = await fetch(`/api/studna/meet/${noteId}`).catch(() => null);
+    const d = await res?.json().catch(() => null);
+    if (!res?.ok || !d?.note) { setError(d?.error ?? "Načtení zápisu selhalo."); return; }
+    const text = what === "summary" ? (d.note.summaryMd ?? "") : (d.note.transcript ?? "");
+    if (!text.trim()) { setError(what === "summary" ? "Zápis je prázdný." : "Přepis je prázdný."); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(`${noteId}-${what}`);
+      setTimeout(() => setCopied(null), 2500);
+    } catch { setError("Kopírování selhalo — zkopíruj text ručně z rozbaleného detailu."); }
   }
 
   async function remove(noteId: string) {
@@ -316,9 +332,25 @@ export default function MeetInbox() {
                     ) : (
                       <div className="text-xs text-muted-foreground italic">Zápis zatím není.</div>
                     )}
-                    {n.transcriptChars > 0 && (
-                      <div className="text-[11px] font-mono text-muted-foreground">plný přepis: {Math.round(n.transcriptChars / 1000)} tis. znaků (uloží se do projektu při přiřazení)</div>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {n.summaryMd && (
+                        <button type="button" onClick={() => void copyNote(n.id, "summary")}
+                          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-accent">
+                          {copied === `${n.id}-summary` ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                          {copied === `${n.id}-summary` ? "Zkopírováno" : "Kopírovat zápis"}
+                        </button>
+                      )}
+                      {n.transcriptChars > 0 && (
+                        <button type="button" onClick={() => void copyNote(n.id, "transcript")}
+                          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-accent">
+                          {copied === `${n.id}-transcript` ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                          {copied === `${n.id}-transcript` ? "Zkopírováno" : "Kopírovat přepis"}
+                        </button>
+                      )}
+                      {n.transcriptChars > 0 && (
+                        <span className="text-[11px] font-mono text-muted-foreground">plný přepis: {Math.round(n.transcriptChars / 1000)} tis. znaků</span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

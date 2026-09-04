@@ -48,3 +48,15 @@ export const PATCH: APIRoute = async ({ params, cookies }) => {
   if (!r.ok) return Response.json({ error: r.error }, { status: 400 });
   return Response.json({ ok: true });
 };
+
+/** GET /api/studna/meet/:id — plný zápis + přepis (pro Kopírovat, Gideon 2026-09-01). */
+export const GET: APIRoute = async ({ params, cookies }) => {
+  const session = await readSession(cookies);
+  if (!session) return Response.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+  const note = await prisma.meetNote.findFirst({
+    where: { id: params.id, userId: session.uid },
+    select: { id: true, eventTitle: true, startedAt: true, summaryMd: true, transcript: true },
+  });
+  if (!note) return Response.json({ error: "Zápis nenalezen." }, { status: 404 });
+  return Response.json({ ok: true, note });
+};
