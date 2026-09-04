@@ -162,8 +162,15 @@ export default function MeetInbox() {
     } catch { setError("Kopírování selhalo — zkopíruj text ručně z rozbaleného detailu."); }
   }
 
+  // confirm() v PWA nefunguje → dvouklikové potvrzení v UI
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   async function remove(noteId: string) {
-    if (!confirm("Zahodit tento zápis? Sync ho už nevrátí.")) return;
+    if (confirmRemove !== noteId) {
+      setConfirmRemove(noteId);
+      setTimeout(() => setConfirmRemove((v) => (v === noteId ? null : v)), 4000);
+      return;
+    }
+    setConfirmRemove(null);
     const res = await fetch(`/api/studna/meet/${noteId}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok) setNotes((ns) => ns?.filter((n) => n.id !== noteId) ?? null);
   }
@@ -318,8 +325,8 @@ export default function MeetInbox() {
                       <RotateCw className="size-3.5" />
                     </button>
                   )}
-                  <button type="button" onClick={() => void remove(n.id)} title="Zahodit zápis" className="p-1 rounded text-muted-foreground hover:text-foreground">
-                    <X className="size-3.5" />
+                  <button type="button" onClick={() => void remove(n.id)} title={confirmRemove === n.id ? "Opravdu zahodit? Klikni znovu" : "Zahodit zápis"} className={`p-1 rounded ${confirmRemove === n.id ? "text-[color:var(--c-signal)]" : "text-muted-foreground hover:text-foreground"}`}>
+                    {confirmRemove === n.id ? <span className="text-[11px] font-mono px-1">Opravdu?</span> : <X className="size-3.5" />}
                   </button>
                 </div>
                 {isOpen && (
